@@ -60,6 +60,20 @@ Omniroute-URL, API-sleutel (wordt nooit teruggestuurd naar de browser), model, t
 maximale bestandsgrootte, systeemprompt en het leerkrachtenwachtwoord. Met "Verbinding testen"
 controleer je de Omniroute-instellingen.
 
+### Vakken & training (gericht verbeteren)
+
+De robot wordt niet "getraind" in de zin van model-finetuning. In plaats daarvan krijgt de AI per
+vak extra context mee (context-injectie). In **Beheer → Vakken & training** maak je per vak een profiel met:
+
+- **Onderwerpen**: één per regel; de leerkracht vinkt ze aan bij het uploaden
+- **Instructies**: vakspecifieke regels (bv. puntenverdeling, eenheden, taalgebruik)
+- **Voorbeelden**: voorbeelden van goede verbeteringen
+- **Referentiemateriaal**: cursus, correctiemodel, ... (upload of plak tekst). Bij elke verbetering worden
+  de meest relevante fragmenten (max. ±10.000 tekens) automatisch geselecteerd.
+
+Leerkrachten kiezen bij het uploaden een vak en eventueel onderwerpen. De profielen worden bewaard in
+`data/subjects.json` (Docker-volume `verbeterrobot_data`).
+
 ### 3. Lokaal draaien (dev)
 
 ```bash
@@ -72,8 +86,29 @@ De app is bereikbaar op `http://localhost:5173` (Vite dev-server met proxy naar 
 ### 4. Productie (Docker)
 
 ```bash
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
+
+### Versiebeheer (app-dashboard)
+
+De app volgt dezelfde werkwijze als de andere VTIZ-apps: GitHub Actions bouwt bij een push op `main`
+het image `ghcr.io/nickb-vtiz/verbeterrobot:<versie>` en maakt release `v<versie>`. De versie is
+`version` in `package.json`. Nieuwe release maken:
+
+```bash
+npm version patch    # of minor / major
+git push --follow-tags
+```
+
+Het app-dashboard toont daarna "Nieuw: vX.Y.Z" met een knop **Bijwerken**. De compose-service heet `app`
+en de versie staat in `APP_VERSION` in `.env` (door het dashboard beheerd). Lokaal bouwen:
+`docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
+
+### Systeemprompt
+
+Schrijf in het beheer enkel de inhoudelijke richtlijnen (vakconventies, notatie, werkwijze bij berekeningen).
+De server voegt zelf altijd het technische uitvoerformaat (JSON met `vraag` en `antwoord`) toe en
+bewerkt het bestand zelf; instructies over bestanden openen, pandoc of PDF's zijn niet nodig.
 
 De app is bereikbaar op `http://<host>:3010`.
 

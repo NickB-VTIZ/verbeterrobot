@@ -1,7 +1,7 @@
 services:
-  verbeterrobot:
-    build: .
-    image: verbeterrobot:latest
+  # Servicenaam "app" = conventie van het app-dashboard (versiebeheer via GHCR)
+  app:
+    image: ghcr.io/nickb-vtiz/verbeterrobot:${APP_VERSION:-latest}
     container_name: verbeterrobot
     restart: unless-stopped
     ports:
@@ -13,7 +13,7 @@ services:
     volumes:
       # Tijdelijke uploads — worden na verwerking automatisch verwijderd
       - verbeterrobot_uploads:/app/uploads
-      # Beheerinstellingen (settings.json) blijven bewaard bij updates
+      # Beheerinstellingen en vakprofielen (settings.json, subjects.json) blijven bewaard bij updates
       - verbeterrobot_data:/app/data
 
 volumes:

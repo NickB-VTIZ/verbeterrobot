@@ -10,6 +10,16 @@ import { parseDocument } from "./parser.js";
 import { getAnswersFromAI } from "./ai.js";
 import { injectAnswers } from "./injector.js";
 import {
+  listSubjectsPublic,
+  listSubjectsAdmin,
+  getSubject,
+  upsertSubject,
+  deleteSubject,
+  addReference,
+  removeReference,
+  buildSubjectContext,
+} from "./subjects.js";
+import {
   getSettings,
   publicSettings,
   updateSettings,
@@ -82,6 +92,11 @@ app.get("/api/config", (_req, res) =>
   res.json({ maxFileMb: getSettings().maxFileMb })
 );
 
+// Vakken + onderwerpen (voor de keuzelijst van de leerkracht)
+app.get("/api/subjects", requireRole("teacher", "admin"), (_req, res) =>
+  res.json(listSubjectsPublic())
+);
+
 // ── Aanmelden ─────────────────────────────────────────────────────────
 // Body: { role: "teacher" | "admin", password }
 app.post("/api/login", (req, res) => {
@@ -147,6 +162,59 @@ app.put("/api/admin/settings", requireRole("admin"), (req, res) => {
   }
 });
 
+// ── Beheer: vakken ("training") ───────────────────────────────────────
+function handle(fn) {
+  return (req, res) => {
+    try {
+      res.json(fn(req) ?? { ok: true });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  };
+}
+
+app.get("/api/admin/subjects", requireRole("admin"), (_req, res) =>
+  res.json(listSubjectsAdmin())
+);
+app.post("/api/admin/subjects", requireRole("admin"), handle((req) => upsertSubject(req.body)));
+app.put("/api/admin/subjects/:id", requireRole("admin"), handle((req) => upsertSubject(req.body, req.params.id)));
+app.delete("/api/admin/subjects/:id", requireRole("admin"), handle((req) => deleteSubject(req.params.id)));
+
+// Referentiemateriaal: bestand uploaden (tekst wordt geëxtraheerd, bestand wordt verwijderd)
+app.post(
+  "/api/admin/subjects/:id/references",
+  requireRole("admin"),
+  (req, res, next) => {
+    makeUpload().single("file")(req, res, (err) => {
+      if (err) return res.status(400).json({ error: err.message });
+      next();
+    });
+  },
+  async (req, res) => {
+    const file = req.file;
+    try {
+      if (!getSubject(req.params.id)) throw new Error("Vak niet gevonden.");
+      let text = String(req.body?.tekst ?? "");
+      let naam = String(req.body?.naam ?? "");
+      if (file) {
+        const ext = path.extname(file.originalname).toLowerCase();
+        text = await parseDocument(file.path, ext);
+        naam = naam || file.originalname;
+      }
+      res.json(addReference(req.params.id, naam, text));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    } finally {
+      if (file) cleanup(file.path);
+    }
+  }
+);
+app.delete(
+  "/api/admin/subjects/:id/references/:refId",
+  requireRole("admin"),
+  handle((req) => removeReference(req.params.id, req.params.refId))
+);
+
 // Test de verbinding met Omniroute met de huidige (opgeslagen) instellingen
 app.post("/api/admin/test", requireRole("admin"), async (_req, res) => {
   const cfg = getSettings();
@@ -184,6 +252,14 @@ app.post(
   async (req, res) => {
     const file = req.file;
     const extraContext = req.body?.context || "";
+    const subject = req.body?.subjectId ? getSubject(String(req.body.subjectId)) : null;
+    let topics = [];
+    try {
+      topics = JSON.parse(req.body?.topics || "[]");
+      if (!Array.isArray(topics)) topics = [];
+    } catch {
+      topics = [];
+    }
 
     if (!file) {
       return res.status(400).json({ error: "Geen bestand ontvangen." });
@@ -204,7 +280,8 @@ app.post(
       }
 
       // 2. AI: antwoorden genereren
-      const answers = await getAnswersFromAI(text, extraContext);
+      const subjectContext = buildSubjectContext(subject, text, topics);
+      const answers = await getAnswersFromAI(text, extraContext, subjectContext);
       if (!answers || answers.length === 0) {
         cleanup(filePath);
         return res

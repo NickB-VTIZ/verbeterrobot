@@ -12,6 +12,13 @@ interface ProcessingStage {
   active: boolean;
 }
 
+interface SubjectOption {
+  id: string;
+  naam: string;
+  graad: string;
+  onderwerpen: string[];
+}
+
 const ACCEPTED = ".docx,.pdf,.pptx,.xlsx,.xls,.txt";
 
 // ── SVG-icoontjes (inline, geen extra dep) ────────────────────────────
@@ -93,6 +100,10 @@ export default function App() {
   const [dragActive, setDragActive] = useState(false);
   const [fileError, setFileError] = useState("");
 
+  const [subjects, setSubjects] = useState<SubjectOption[]>([]);
+  const [subjectId, setSubjectId] = useState("");
+  const [topics, setTopics] = useState<string[]>([]);
+
   const [stages, setStages] = useState<ProcessingStage[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
   const [downloadUrl, setDownloadUrl] = useState("");
@@ -107,6 +118,21 @@ export default function App() {
       .then(d => { if (typeof d.maxFileMb === "number") setMaxMb(d.maxFileMb); })
       .catch(() => {});
   }, [step]);
+
+  // Vakken (voor gerichte verbetering) laden zodra een sessie bestaat
+  useEffect(() => {
+    if (!token || step !== "upload") return;
+    fetch("/api/subjects", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => (r.ok ? r.json() : { subjects: [] }))
+      .then(d => setSubjects(Array.isArray(d) ? d : Array.isArray(d.subjects) ? d.subjects : []))
+      .catch(() => {});
+  }, [token, step]);
+
+  const selectedSubject = subjects.find(s => s.id === subjectId);
+
+  function toggleTopic(t: string) {
+    setTopics(prev => (prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]));
+  }
 
   // ── Aanmelden ───────────────────────────────────────────────────────
   async function handleLogin(e: React.FormEvent) {
@@ -221,6 +247,10 @@ export default function App() {
       const form = new FormData();
       form.append("file", file);
       if (context.trim()) form.append("context", context.trim());
+      if (subjectId) {
+        form.append("subjectId", subjectId);
+        if (topics.length) form.append("topics", JSON.stringify(topics));
+      }
 
       advanceStage("upload", "parse");
 
@@ -267,6 +297,8 @@ export default function App() {
     if (downloadUrl) URL.revokeObjectURL(downloadUrl);
     setFile(null);
     setContext("");
+    setSubjectId("");
+    setTopics([]);
     setFileError("");
     setDownloadUrl("");
     setDownloadName("");
@@ -392,6 +424,55 @@ export default function App() {
                   className="text-gray-400 hover:text-red-500 transition-colors text-lg leading-none"
                   title="Verwijder bestand"
                 >×</button>
+              </div>
+            )}
+
+            {/* Vak & onderwerpen */}
+            {subjects.length > 0 && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Vak <span className="text-gray-400 font-normal">(optioneel, voor gerichte verbetering)</span>
+                  </label>
+                  <select
+                    value={subjectId}
+                    onChange={e => { setSubjectId(e.target.value); setTopics([]); }}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent bg-white"
+                  >
+                    <option value="">Algemeen (geen vak)</option>
+                    {subjects.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.naam}{s.graad ? ` (${s.graad})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {selectedSubject && selectedSubject.onderwerpen.length > 0 && (
+                  <div>
+                    <p className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Onderwerpen <span className="text-gray-400 font-normal">(kies wat in dit document aan bod komt)</span>
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedSubject.onderwerpen.map(t => {
+                        const on = topics.includes(t);
+                        return (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => toggleTopic(t)}
+                            className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                              on
+                                ? "bg-red-600 text-white border-red-600"
+                                : "bg-white text-gray-600 border-gray-300 hover:border-red-400"
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

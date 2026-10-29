@@ -1,4 +1,5 @@
 import { useEffect, useState, FormEvent } from "react";
+import SubjectsAdmin from "./SubjectsAdmin";
 
 interface PublicSettings {
   omnirouteBaseUrl: string;
@@ -138,6 +139,7 @@ export default function Admin({ token, onUnauthorized, onUseTool, onLogout }: Pr
   }
 
   return (
+    <div>
     <form onSubmit={onSubmit} className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold text-gray-900">Beheer</h2>
@@ -318,5 +320,7 @@ export default function Admin({ token, onUnauthorized, onUseTool, onLogout }: Pr
         {busy ? "Opslaan…" : "Instellingen opslaan"}
       </button>
     </form>
+    <SubjectsAdmin token={token} onUnauthorized={onUnauthorized} />
+    </div>
   );
 }
