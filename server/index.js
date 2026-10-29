@@ -19,6 +19,8 @@ import {
   removeReference,
   buildSubjectContext,
 } from "./subjects.js";
+import { listLessons, addLesson, deleteLesson, buildTrainingContext } from "./training.js";
+import { memoryActive, testMemory, rememberLesson, recallLessons } from "./memory.js";
 import {
   getSettings,
   publicSettings,
@@ -215,6 +217,42 @@ app.delete(
   handle((req) => removeReference(req.params.id, req.params.refId))
 );
 
+// ── Beheer: trainingslessen + agentmemory ─────────────────────────────
+app.get("/api/admin/training", requireRole("admin"), (_req, res) =>
+  res.json({ lessons: listLessons(), memoryActive: memoryActive() })
+);
+app.post("/api/admin/training", requireRole("admin"), async (req, res) => {
+  try {
+    const { tekst, vakId, soort } = req.body || {};
+    const vak = vakId ? getSubject(String(vakId)) : null;
+    if (vakId && !vak) throw new Error("Vak niet gevonden.");
+    const lesson = addLesson({ tekst, vakId: vak?.id || null, vakNaam: vak?.naam || "", soort });
+    let memory = "uit";
+    if (memoryActive()) {
+      try {
+        await rememberLesson({ tekst: lesson.tekst, vak: vak?.naam, soort: lesson.soort });
+        memory = "opgeslagen";
+      } catch (err) {
+        memory = `mislukt: ${err.message}`;
+      }
+    }
+    res.json({ lesson, memory });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete("/api/admin/training/:id", requireRole("admin"), handle((req) => deleteLesson(req.params.id)));
+
+// Test de verbinding met de agentmemory-server (opgeslagen instellingen)
+app.post("/api/admin/memory/test", requireRole("admin"), async (_req, res) => {
+  try {
+    await testMemory();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: `Verbinding mislukt: ${err.message}` });
+  }
+});
+
 // Test de verbinding met Omniroute met de huidige (opgeslagen) instellingen
 app.post("/api/admin/test", requireRole("admin"), async (_req, res) => {
   const cfg = getSettings();
@@ -280,7 +318,13 @@ app.post(
       }
 
       // 2. AI: antwoorden genereren
-      const subjectContext = buildSubjectContext(subject, text, topics);
+      const recalled = await recallLessons(
+        `${subject?.naam || ""} ${topics.join(" ")} ${text.slice(0, 300)}`
+      );
+      const training = buildTrainingContext(subject?.id || null, recalled);
+      const subjectContext = [buildSubjectContext(subject, text, topics), training]
+        .filter(Boolean)
+        .join("\n\n");
       const answers = await getAnswersFromAI(text, extraContext, subjectContext);
       if (!answers || answers.length === 0) {
         cleanup(filePath);

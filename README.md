@@ -74,6 +74,22 @@ vak extra context mee (context-injectie). In **Beheer → Vakken & training** ma
 Leerkrachten kiezen bij het uploaden een vak en eventueel onderwerpen. De profielen worden bewaard in
 `data/subjects.json` (Docker-volume `verbeterrobot_data`).
 
+### Training: prompts & lessen + geheugen (agentmemory)
+
+Onderaan het beheer staat **Training: prompts & lessen**. Daar schrijf je vrije prompts als
+*richtlijn*, *correctie* of *voorbeeld* — voor alle vakken of voor één vak. Bij elke verbetering worden
+de algemene lessen en die van het gekozen vak aan de prompt toegevoegd (max. ±4000 tekens).
+Opslag: `data/training.json`.
+
+Optioneel kan je de robot koppelen aan een **agentmemory**-server (dezelfde als de MCP-server gebruikt):
+
+- Zet in het beheer (**Geheugen**) de server-URL, het geheim en een projectnaam, vink "Geheugen gebruiken" aan
+  en klik "Test verbinding". Of gebruik `AGENTMEMORY_*` in `.env` (zie `.env.example`).
+- Nieuwe lessen worden dan ook in agentmemory bewaard (met de tag `[projectnaam]`).
+- Bij elke verbetering zoekt de robot de relevante lessen op (vak, onderwerpen, begin van het document) en
+  geeft die mee. Is de server onbereikbaar, dan werkt de robot gewoon verder zonder die lessen.
+- Het geheim wordt nooit teruggestuurd naar de browser en hoort niet in de repository.
+
 ### 3. Lokaal draaien (dev)
 
 ```bash

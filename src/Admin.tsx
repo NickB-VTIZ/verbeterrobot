@@ -1,5 +1,6 @@
 import { useEffect, useState, FormEvent } from "react";
 import SubjectsAdmin from "./SubjectsAdmin";
+import TrainingAdmin from "./TrainingAdmin";
 
 interface PublicSettings {
   omnirouteBaseUrl: string;
@@ -321,6 +322,7 @@ export default function Admin({ token, onUnauthorized, onUseTool, onLogout }: Pr
       </button>
     </form>
     <SubjectsAdmin token={token} onUnauthorized={onUnauthorized} />
+    <TrainingAdmin token={token} onUnauthorized={onUnauthorized} />
     </div>
   );
 }

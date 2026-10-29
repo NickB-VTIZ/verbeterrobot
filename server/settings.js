@@ -40,6 +40,10 @@ function envDefaults() {
     maxFileMb: parseInt(process.env.MAX_FILE_MB || "20", 10),
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     teacherPasswordHash: "",
+    memoryEnabled: process.env.AGENTMEMORY_ENABLED === "true",
+    memoryUrl: (process.env.AGENTMEMORY_URL || "").replace(/\/+$/, ""),
+    memorySecret: process.env.AGENTMEMORY_SECRET || "",
+    memoryProject: process.env.AGENTMEMORY_PROJECT || "verbeterrobot",
   };
 }
 
@@ -122,6 +126,11 @@ export function publicSettings() {
     systemPrompt: s.systemPrompt,
     defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
     teacherPasswordSource: s.teacherPasswordHash ? "beheer" : "env",
+    memoryEnabled: !!s.memoryEnabled,
+    memoryUrl: s.memoryUrl,
+    hasMemorySecret: !!s.memorySecret,
+    memorySecretHint: s.memorySecret ? `••••${s.memorySecret.slice(-4)}` : "",
+    memoryProject: s.memoryProject,
   };
 }
 
@@ -170,6 +179,29 @@ export function updateSettings(input = {}) {
     next.teacherPasswordHash = hashPassword(pw);
   }
   if (input.resetTeacherPassword) delete next.teacherPasswordHash;
+
+  if (input.memoryEnabled !== undefined) next.memoryEnabled = !!input.memoryEnabled;
+  if (input.memoryUrl !== undefined) {
+    const url = String(input.memoryUrl).trim().replace(/\/+$/, "");
+    if (url && !/^https?:\/\/[^\s]+$/i.test(url)) {
+      throw new Error("Geheugen-URL moet beginnen met http:// of https://");
+    }
+    next.memoryUrl = url;
+  }
+  if (input.memorySecret !== undefined && String(input.memorySecret).trim() !== "") {
+    next.memorySecret = String(input.memorySecret).trim();
+  }
+  if (input.clearMemorySecret) next.memorySecret = "";
+  if (input.memoryProject !== undefined) {
+    const p = String(input.memoryProject).trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9_-]{1,40}$/.test(p)) {
+      throw new Error("Projectnaam: 2-41 tekens, enkel kleine letters, cijfers, - en _.");
+    }
+    next.memoryProject = p;
+  }
+  if (next.memoryEnabled && (!(next.memoryUrl ?? getSettings().memoryUrl) || !(next.memorySecret ?? getSettings().memorySecret))) {
+    throw new Error("Geheugen inschakelen vereist een URL en een geheim (secret).");
+  }
 
   persist(next);
   return publicSettings();
