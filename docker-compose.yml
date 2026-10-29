@@ -1,0 +1,17 @@
+services:
+  verbeterrobot:
+    build: .
+    image: verbeterrobot:latest
+    container_name: verbeterrobot
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3010}:3010"
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    volumes:
+      # Tijdelijke uploads — worden na verwerking automatisch verwijderd
+      - verbeterrobot_uploads:/app/uploads
+
+volumes:
+  verbeterrobot_uploads:
