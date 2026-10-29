@@ -36,6 +36,8 @@ function envDefaults() {
     omnirouteBaseUrl: process.env.OMNIROUTE_BASE_URL || "https://omniroute.example.com/v1",
     omnirouteApiKey: process.env.OMNIROUTE_API_KEY || "",
     omnirouteModel: process.env.OMNIROUTE_MODEL || "gpt-4o",
+    visualCheckEnabled: process.env.VISUAL_CHECK !== "off",
+    visionModel: process.env.VISION_MODEL || "",
     temperature: 0.2,
     maxFileMb: parseInt(process.env.MAX_FILE_MB || "20", 10),
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
@@ -122,6 +124,8 @@ export function publicSettings() {
     hasApiKey: !!s.omnirouteApiKey,
     apiKeyHint: s.omnirouteApiKey ? `••••${s.omnirouteApiKey.slice(-4)}` : "",
     temperature: s.temperature,
+    visualCheckEnabled: s.visualCheckEnabled !== false,
+    visionModel: s.visionModel || "",
     maxFileMb: s.maxFileMb,
     systemPrompt: s.systemPrompt,
     defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
@@ -156,6 +160,12 @@ export function updateSettings(input = {}) {
     const m = String(input.omnirouteModel).trim();
     if (!m) throw new Error("Model mag niet leeg zijn.");
     next.omnirouteModel = m;
+  }
+  if (input.visualCheckEnabled !== undefined) next.visualCheckEnabled = !!input.visualCheckEnabled;
+  if (input.visionModel !== undefined) {
+    const m = String(input.visionModel).trim();
+    if (m.length > 200) throw new Error("Vision-model is te lang.");
+    next.visionModel = m;
   }
   if (input.temperature !== undefined) {
     const t = Number(input.temperature);

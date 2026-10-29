@@ -9,6 +9,8 @@ import multer from "multer";
 import { parseDocument } from "./parser.js";
 import { getAnswersFromAI } from "./ai.js";
 import { injectAnswers } from "./injector.js";
+import { runDocxPipeline } from "./docx/pipeline.js";
+import { toolsAvailable } from "./docx/visual.js";
 import {
   listSubjectsPublic,
   listSubjectsAdmin,
@@ -20,7 +22,14 @@ import {
   buildSubjectContext,
 } from "./subjects.js";
 import { listLessons, addLesson, deleteLesson, buildTrainingContext } from "./training.js";
-import { memoryActive, testMemory, rememberLesson, recallLessons } from "./memory.js";
+import { memoryActive, memoryConfigured, rememberLesson, recallLessons } from "./memory.js";
+import {
+  VERSION,
+  uptimeSeconds,
+  lastResult,
+  testOmniroute,
+  testAgentmemory,
+} from "./health.js";
 import {
   getSettings,
   publicSettings,
@@ -88,10 +97,10 @@ if (fs.existsSync(DIST)) {
 }
 
 // ── Health & publieke config ──────────────────────────────────────────
-app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.get("/api/health", (_req, res) => res.json({ ok: true, version: VERSION }));
 
 app.get("/api/config", (_req, res) =>
-  res.json({ maxFileMb: getSettings().maxFileMb })
+  res.json({ maxFileMb: getSettings().maxFileMb, version: VERSION })
 );
 
 // Vakken + onderwerpen (voor de keuzelijst van de leerkracht)
@@ -243,34 +252,63 @@ app.post("/api/admin/training", requireRole("admin"), async (req, res) => {
 });
 app.delete("/api/admin/training/:id", requireRole("admin"), handle((req) => deleteLesson(req.params.id)));
 
+// Statusoverzicht voor het beheerscherm
+app.get("/api/admin/status", requireRole("admin"), async (_req, res) => {
+  const cfg = getSettings();
+  const pub = publicSettings();
+  let tools = null;
+  try {
+    tools = await toolsAvailable();
+  } catch {
+    tools = null;
+  }
+  res.json({
+    visual: {
+      enabled: cfg.visualCheckEnabled !== false && process.env.VISUAL_CHECK !== "off",
+      visionModel: cfg.visionModel || "",
+      libreoffice: tools ? tools.soffice : null,
+      libreofficeVersion: tools ? tools.version : "",
+      poppler: tools ? tools.pdftoppm : false,
+      available: tools ? tools.available : false,
+    },
+    version: VERSION,
+    uptimeSeconds: uptimeSeconds(),
+    node: process.version,
+    omniroute: {
+      baseUrl: cfg.omnirouteBaseUrl,
+      model: cfg.omnirouteModel,
+      configured: !!(cfg.omnirouteBaseUrl && cfg.omnirouteApiKey),
+      last: lastResult("omniroute"),
+    },
+    memory: {
+      enabled: !!cfg.memoryEnabled,
+      configured: memoryConfigured(),
+      url: cfg.memoryUrl || "",
+      project: cfg.memoryProject || "",
+      last: lastResult("memory"),
+    },
+    counts: { subjects: listSubjectsAdmin().length, lessons: listLessons().length },
+    teacherPasswordSource: pub.teacherPasswordSource,
+    teacherConfigured: teacherConfigured(),
+    maxFileMb: cfg.maxFileMb,
+  });
+});
+
 // Test de verbinding met de agentmemory-server (opgeslagen instellingen)
 app.post("/api/admin/memory/test", requireRole("admin"), async (_req, res) => {
   try {
-    await testMemory();
-    res.json({ ok: true });
+    res.json(await testAgentmemory());
   } catch (err) {
-    res.status(502).json({ error: `Verbinding mislukt: ${err.message}` });
+    res.status(502).json({ ok: false, error: `Verbinding mislukt: ${err.message}` });
   }
 });
 
-// Test de verbinding met Omniroute met de huidige (opgeslagen) instellingen
-app.post("/api/admin/test", requireRole("admin"), async (_req, res) => {
-  const cfg = getSettings();
+// Test de verbinding met Omniroute (opgeslagen instellingen); { deep: true } doet ook een chat-test
+app.post("/api/admin/test", requireRole("admin"), async (req, res) => {
   try {
-    const fetch = (await import("node-fetch")).default;
-    const r = await fetch(`${cfg.omnirouteBaseUrl}/models`, {
-      headers: { Authorization: `Bearer ${cfg.omnirouteApiKey}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok) {
-      const body = await r.text();
-      return res.status(502).json({
-        error: `Omniroute antwoordde met status ${r.status}: ${body.slice(0, 200)}`,
-      });
-    }
-    res.json({ ok: true });
+    res.json(await testOmniroute({ deep: !!req.body?.deep }));
   } catch (err) {
-    res.status(502).json({ error: `Verbinding mislukt: ${err.message}` });
+    res.status(502).json({ ok: false, error: `Verbinding mislukt: ${err.message}` });
   }
 });
 
@@ -325,16 +363,62 @@ app.post(
       const subjectContext = [buildSubjectContext(subject, text, topics), training]
         .filter(Boolean)
         .join("\n\n");
-      const answers = await getAnswersFromAI(text, extraContext, subjectContext);
-      if (!answers || answers.length === 0) {
-        cleanup(filePath);
-        return res
-          .status(422)
-          .json({ error: "AI kon geen vragen vinden in het document." });
+      // 2a. .docx: gestructureerde pipeline (paragraaf-ID's, slots, controle van berekeningen)
+      let review = null;
+      let clarifications = [];
+      let visualStatus = "";
+      if (ext === ".docx" && process.env.DOCX_PIPELINE !== "off") {
+        try {
+          const result = await runDocxPipeline(filePath, { extraContext, subjectContext });
+          if (result) {
+            outputPath = result.outputPath;
+            review = result.review;
+            clarifications = result.clarifications || [];
+            visualStatus = result.visual?.status || "";
+            for (const w of result.warnings) console.warn("docx-pipeline:", w);
+            console.log(
+              `docx-pipeline: ${result.questions} vraag/vragen, ${review.length} om na te kijken.`
+            );
+          }
+        } catch (err) {
+          console.error("docx-pipeline mislukt, terugval op klassieke methode:", err.message);
+        }
       }
 
-      // 3. Antwoorden injecteren in origineel document
-      outputPath = await injectAnswers(filePath, ext, answers);
+      // 2b. Klassieke methode (andere formaten, of terugval)
+      if (!outputPath) {
+        const answers = await getAnswersFromAI(text, extraContext, subjectContext);
+        if (!answers || answers.length === 0) {
+          cleanup(filePath);
+          return res
+            .status(422)
+            .json({ error: "AI kon geen vragen vinden in het document." });
+        }
+
+        // 3. Antwoorden injecteren in origineel document
+        outputPath = await injectAnswers(filePath, ext, answers);
+      }
+
+      if (review) {
+        res.setHeader("X-Nakijken-Aantal", String(review.length));
+        if (review.length) {
+          res.setHeader(
+            "X-Nakijken",
+            encodeURIComponent(JSON.stringify(review)).slice(0, 4000)
+          );
+        }
+        if (clarifications.length) {
+          res.setHeader(
+            "X-Verduidelijking",
+            encodeURIComponent(JSON.stringify(clarifications)).slice(0, 3000)
+          );
+        }
+        if (visualStatus) res.setHeader("X-Visuele-Controle", visualStatus);
+        res.setHeader(
+          "Access-Control-Expose-Headers",
+          "X-Nakijken, X-Nakijken-Aantal, X-Verduidelijking, X-Visuele-Controle"
+        );
+      }
 
       // 4. Terugsturen
       const downloadName = `verbetersleutel_${file.originalname}`;

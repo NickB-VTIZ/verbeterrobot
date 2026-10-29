@@ -92,6 +92,7 @@ export default function App() {
   const [role, setRole] = useState<Role>("teacher");
   const [token, setToken] = useState("");
   const [maxMb, setMaxMb] = useState(20);
+  const [version, setVersion] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -107,6 +108,10 @@ export default function App() {
 
   const [stages, setStages] = useState<ProcessingStage[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
+  const [reviewItems, setReviewItems] = useState<{ qid: string; reden: string }[]>([]);
+  const [clarifications, setClarifications] = useState<string[]>([]);
+  const [visualStatus, setVisualStatus] = useState("");
+  const [clarifyAnswer, setClarifyAnswer] = useState("");
   const [downloadUrl, setDownloadUrl] = useState("");
   const [downloadName, setDownloadName] = useState("");
 
@@ -116,7 +121,10 @@ export default function App() {
   useEffect(() => {
     fetch("/api/config")
       .then(r => r.json())
-      .then(d => { if (typeof d.maxFileMb === "number") setMaxMb(d.maxFileMb); })
+      .then(d => {
+        if (typeof d.maxFileMb === "number") setMaxMb(d.maxFileMb);
+        if (typeof d.version === "string") setVersion(d.version);
+      })
       .catch(() => {});
   }, [step]);
 
@@ -221,14 +229,25 @@ export default function App() {
   const onDragLeave = useCallback(() => setDragActive(false), []);
 
   // ── Verbetering starten ────────────────────────────────────────────
-  async function handleImprove() {
+  async function handleImprove(extra = "") {
     if (!file) return;
+
+    // Verduidelijking van de leerkracht wordt aan de context toegevoegd (en onthouden voor een volgende ronde)
+    const fullContext = [context.trim(), extra.trim() && `Verduidelijking van de leerkracht: ${extra.trim()}`]
+      .filter(Boolean)
+      .join("\n\n");
+    if (extra.trim()) setContext(fullContext);
+    setClarifyAnswer("");
+    setReviewItems([]);
+    setClarifications([]);
+    setVisualStatus("");
 
     setStages([
       { id: "upload",   label: "Bestand uploaden",         done: false, active: true  },
       { id: "parse",    label: "Document analyseren",       done: false, active: false },
       { id: "ai",       label: "AI genereert antwoorden",   done: false, active: false },
       { id: "inject",   label: "Verbetersleutel injecteren",done: false, active: false },
+      { id: "visual",   label: "Visuele controle (LibreOffice)", done: false, active: false },
       { id: "ready",    label: "Klaar voor download",       done: false, active: false },
     ]);
     setStep("processing");
@@ -247,7 +266,7 @@ export default function App() {
     try {
       const form = new FormData();
       form.append("file", file);
-      if (context.trim()) form.append("context", context.trim());
+      if (fullContext) form.append("context", fullContext);
       if (subjectId) {
         form.append("subjectId", subjectId);
         if (topics.length) form.append("topics", JSON.stringify(topics));
@@ -274,9 +293,24 @@ export default function App() {
 
       advanceStage("ai", "inject");
 
+      // Nakijklijst en verduidelijkingsvragen uit de headers
+      const readJsonHeader = <T,>(name: string): T | null => {
+        const raw = res.headers.get(name);
+        if (!raw) return null;
+        try {
+          return JSON.parse(decodeURIComponent(raw)) as T;
+        } catch {
+          return null;
+        }
+      };
+      setReviewItems(readJsonHeader<{ qid: string; reden: string }[]>("X-Nakijken") ?? []);
+      setClarifications(readJsonHeader<string[]>("X-Verduidelijking") ?? []);
+      setVisualStatus(res.headers.get("X-Visuele-Controle") ?? "");
+
       const blob = await res.blob();
 
-      advanceStage("inject", "ready");
+      advanceStage("inject", "visual");
+      advanceStage("visual", "ready");
 
       const url = URL.createObjectURL(blob);
       const ext = file.name.split(".").pop() ?? "docx";
@@ -305,6 +339,10 @@ export default function App() {
     setDownloadName("");
     setStages([]);
     setErrorMsg("");
+    setReviewItems([]);
+    setClarifications([]);
+    setVisualStatus("");
+    setClarifyAnswer("");
     setStep(role === "admin" && token ? "admin" : "upload");
   }
 
@@ -346,6 +384,7 @@ export default function App() {
         "Tussenstappen netjes noteren…",
       ];
     } else if (activeStageId === "inject") bubbleMessages = ["Ik pak mijn rode stift 🖍️", "Antwoorden bij de juiste vragen zetten…"];
+    else if (activeStageId === "visual") bubbleMessages = ["Ik laat LibreOffice meekijken…", "Staat de opmaak nog goed?"];
     else bubbleMessages = ["Bijna klaar…"];
   } else if (step === "done") {
     bubbleMessages = ["Klaar! Je verbetersleutel staat klaar 🎉", "Controleer de rode antwoorden altijd even zelf."];
@@ -358,7 +397,7 @@ export default function App() {
     step === "upload"
       ? file ? 2 : 1
       : step === "processing"
-      ? activeStageId === "inject" || activeStageId === "ready" ? 4 : 3
+      ? activeStageId === "inject" || activeStageId === "visual" || activeStageId === "ready" ? 4 : 3
       : step === "done"
       ? 5
       : step === "error"
@@ -370,7 +409,14 @@ export default function App() {
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-gray-50 to-red-50">
       {/* Header: robot met denkballon */}
       <div className={`mb-6 w-full ${step === "admin" ? "max-w-2xl" : "max-w-lg"}`}>
-        <h1 className="text-3xl font-bold text-gray-900 text-center">Verbeterrobot</h1>
+        <h1 className="text-3xl font-bold text-gray-900 text-center">
+          Verbeterrobot
+          {version && (
+            <span className="ml-2 align-middle text-xs font-semibold text-red-700 bg-red-50 rounded-full px-2 py-0.5">
+              v{version}
+            </span>
+          )}
+        </h1>
         <p className="text-gray-500 mt-1 text-center text-sm">Upload een taak of toets — de AI maakt de verbetersleutel</p>
         <div className="flex items-center gap-6 mt-5 pl-4">
           <RobotMascot mood={mood} className="w-24 h-28 shrink-0" />
@@ -430,6 +476,7 @@ export default function App() {
         {step === "admin" && (
           <Admin
             token={token}
+            version={version}
             onUnauthorized={sessionExpired}
             onUseTool={() => setStep("upload")}
             onLogout={handleLogout}
@@ -566,7 +613,7 @@ export default function App() {
             />
 
             <button
-              onClick={handleImprove}
+              onClick={() => handleImprove()}
               disabled={!file}
               className="btn-primary w-full justify-center"
             >
@@ -624,6 +671,51 @@ export default function App() {
               {downloadName}
             </a>
 
+            {visualStatus === "ok" && (
+              <p className="text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">
+                ✓ Visuele controle: de opmaak van het resultaat ziet er goed uit.
+              </p>
+            )}
+
+            {reviewItems.length > 0 && (
+              <div className="text-left rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-sm font-semibold text-amber-800 mb-1">Kijk deze onderdelen zelf even na</p>
+                <ul className="list-disc pl-5 space-y-1 text-xs text-amber-900">
+                  {reviewItems.map((r, i) => (
+                    <li key={i}>
+                      <strong>{r.qid === "layout" ? "Opmaak" : `Vraag ${r.qid}`}:</strong> {r.reden}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {clarifications.length > 0 && (
+              <div className="text-left rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 space-y-2">
+                <p className="text-sm font-semibold text-blue-900">De robot twijfelt en heeft je hulp nodig</p>
+                <ul className="list-disc pl-5 space-y-1 text-xs text-blue-900">
+                  {clarifications.map((q, i) => (
+                    <li key={i}>{q}</li>
+                  ))}
+                </ul>
+                <textarea
+                  className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
+                  rows={3}
+                  value={clarifyAnswer}
+                  onChange={e => setClarifyAnswer(e.target.value)}
+                  placeholder="Typ hier je antwoord of extra uitleg (bv. 'antwoorden onder de vraag zetten, niet in de tabel')"
+                />
+                <button
+                  type="button"
+                  className="btn-secondary w-full justify-center"
+                  disabled={!clarifyAnswer.trim()}
+                  onClick={() => handleImprove(clarifyAnswer)}
+                >
+                  Opnieuw proberen met deze verduidelijking
+                </button>
+              </div>
+            )}
+
             <button onClick={handleReset} className="btn-secondary w-full justify-center">
               Nog een document verbeteren
             </button>
@@ -648,7 +740,7 @@ export default function App() {
       </div>
 
       <p className="mt-6 text-xs text-gray-400">
-        VTI Zandhoven · Verbeterrobot v1.0 · Bestanden worden direct na verwerking verwijderd van de server.
+        VTI Zandhoven · Verbeterrobot{version ? ` v${version}` : ""} · Bestanden worden direct na verwerking verwijderd van de server.
       </p>
     </div>
   );

@@ -9,13 +9,6 @@ interface Lesson {
   aangemaakt: string;
 }
 interface SubjectLite { id: string; naam: string }
-interface MemorySettings {
-  memoryEnabled: boolean;
-  memoryUrl: string;
-  hasMemorySecret: boolean;
-  memorySecretHint: string;
-  memoryProject: string;
-}
 
 interface Props {
   token: string;
@@ -36,16 +29,11 @@ const SOORTEN: { value: Lesson["soort"]; label: string; hint: string }[] = [
 export default function TrainingAdmin({ token, onUnauthorized }: Props) {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [subjects, setSubjects] = useState<SubjectLite[]>([]);
-  const [mem, setMem] = useState<MemorySettings | null>(null);
+  const [memoryOn, setMemoryOn] = useState(false);
 
   const [tekst, setTekst] = useState("");
   const [vakId, setVakId] = useState("");
   const [soort, setSoort] = useState<Lesson["soort"]>("richtlijn");
-
-  const [memEnabled, setMemEnabled] = useState(false);
-  const [memUrl, setMemUrl] = useState("");
-  const [memSecret, setMemSecret] = useState("");
-  const [memProject, setMemProject] = useState("verbeterrobot");
 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
@@ -64,23 +52,14 @@ export default function TrainingAdmin({ token, onUnauthorized }: Props) {
     return data;
   }
 
-  function applyMem(s: MemorySettings) {
-    setMem(s);
-    setMemEnabled(s.memoryEnabled);
-    setMemUrl(s.memoryUrl);
-    setMemProject(s.memoryProject);
-    setMemSecret("");
-  }
-
   async function reload() {
-    const [t, subs, settings] = await Promise.all([
+    const [t, subs] = await Promise.all([
       call("/api/admin/training", { headers: auth }),
       call("/api/admin/subjects", { headers: auth }),
-      call("/api/admin/settings", { headers: auth }),
     ]);
     setLessons(t.lessons);
+    setMemoryOn(!!t.memoryActive);
     setSubjects(subs.map((s: SubjectLite) => ({ id: s.id, naam: s.naam })));
-    applyMem(settings);
   }
 
   useEffect(() => {
@@ -125,39 +104,23 @@ export default function TrainingAdmin({ token, onUnauthorized }: Props) {
     });
   };
 
-  const saveMemory = () =>
-    run(async () => {
-      const body: Record<string, unknown> = {
-        memoryEnabled: memEnabled,
-        memoryUrl: memUrl,
-        memoryProject: memProject,
-      };
-      if (memSecret.trim()) body.memorySecret = memSecret.trim();
-      const data = await call("/api/admin/settings", {
-        method: "PUT",
-        headers: json,
-        body: JSON.stringify(body),
-      });
-      applyMem(data);
-      return "Geheugeninstellingen opgeslagen.";
-    });
-
-  const testMemory = () =>
-    run(async () => {
-      await call("/api/admin/memory/test", { method: "POST", headers: auth });
-      return "Verbinding met agentmemory werkt (opgeslagen instellingen).";
-    });
-
   const current = SOORTEN.find(s => s.value === soort)!;
 
   return (
-    <div className="mt-8 pt-6 border-t border-gray-200 space-y-6">
+    <div className="space-y-6">
       <div>
         <h3 className="text-lg font-bold text-gray-900">Training: prompts & lessen</h3>
         <p className="text-xs text-gray-500 mt-1">
           Schrijf hier richtlijnen, correcties of voorbeelden. Ze worden bij elke verbetering aan de
           prompt toegevoegd (algemeen of enkel voor het gekozen vak). Het model zelf wordt niet
           aangepast: de robot &ldquo;leert&rdquo; via deze context.
+        </p>
+        <p className="text-xs mt-1">
+          Geheugen (agentmemory):{" "}
+          <strong className={memoryOn ? "text-green-700" : "text-gray-500"}>
+            {memoryOn ? "actief — lessen worden ook daar bewaard" : "uit — lessen blijven lokaal"}
+          </strong>{" "}
+          <span className="text-gray-400">(instellen onder Verbindingen)</span>
         </p>
       </div>
 
@@ -224,57 +187,6 @@ export default function TrainingAdmin({ token, onUnauthorized }: Props) {
           </div>
         ))}
       </div>
-
-      <fieldset className="space-y-4 pt-4 border-t border-gray-100">
-        <legend className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">
-          Geheugen (agentmemory)
-        </legend>
-        <p className="text-xs text-gray-500">
-          Koppel de robot aan dezelfde agentmemory-server als de MCP. Nieuwe lessen worden daar
-          bewaard, en bij elke verbetering worden de relevante lessen opgehaald en meegegeven.
-          Als de server niet bereikbaar is, werkt de robot gewoon verder.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input type="checkbox" checked={memEnabled} onChange={e => setMemEnabled(e.target.checked)} />
-          Geheugen gebruiken
-        </label>
-        <div>
-          <label className={labelCls}>Server-URL</label>
-          <input
-            className={inputCls}
-            value={memUrl}
-            onChange={e => setMemUrl(e.target.value)}
-            placeholder="https://mem.example.com"
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className={labelCls}>Geheim (secret)</label>
-            <input
-              type="password"
-              className={inputCls}
-              value={memSecret}
-              onChange={e => setMemSecret(e.target.value)}
-              placeholder={mem?.hasMemorySecret ? mem.memorySecretHint : "niet ingesteld"}
-              autoComplete="new-password"
-            />
-            <p className={hintCls}>Leeg laten om het huidige geheim te behouden.</p>
-          </div>
-          <div>
-            <label className={labelCls}>Projectnaam</label>
-            <input className={inputCls} value={memProject} onChange={e => setMemProject(e.target.value)} />
-            <p className={hintCls}>Scheidt de lessen van andere projecten.</p>
-          </div>
-        </div>
-        <div className="flex gap-3">
-          <button type="button" disabled={busy} onClick={saveMemory} className="btn-primary">
-            Geheugen opslaan
-          </button>
-          <button type="button" disabled={busy} onClick={testMemory} className="btn-secondary">
-            Test verbinding
-          </button>
-        </div>
-      </fieldset>
 
       {msg && (
         <p

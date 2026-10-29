@@ -4,7 +4,7 @@
  * - Authenticatie: Authorization: Bearer <secret>
  * - Alles wat we opslaan krijgt de tag [<project>] zodat we bij het ophalen enkel
  *   herinneringen van de verbeterrobot gebruiken (nooit die van andere projecten).
- * - Fouten blokkeren een verbetering nooit: recall() geeft dan gewoon "" terug.
+ * - Fouten blokkeren een verbetering nooit: recallLessons() geeft dan gewoon "" terug.
  */
 import { getSettings } from "./settings.js";
 
@@ -20,9 +20,13 @@ function cfg() {
   };
 }
 
-export function memoryActive() {
+export function memoryConfigured() {
   const c = cfg();
-  return c.enabled && !!c.url && !!c.secret;
+  return !!c.url && !!c.secret;
+}
+
+export function memoryActive() {
+  return cfg().enabled && memoryConfigured();
 }
 
 async function request(method, urlPath, body) {
@@ -39,18 +43,15 @@ async function request(method, urlPath, body) {
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   const text = await r.text();
+  if (r.status === 401 || r.status === 403) {
+    throw new Error(`Geheugenserver weigert het geheim (status ${r.status}).`);
+  }
   if (!r.ok) throw new Error(`Geheugenserver antwoordde ${r.status}: ${text.slice(0, 200)}`);
   try {
     return JSON.parse(text);
   } catch {
     return text;
   }
-}
-
-/** Test de verbinding (zonder iets op te slaan). */
-export async function testMemory() {
-  await request("GET", "/agentmemory/sessions");
-  return true;
 }
 
 /** Bewaar een les in het geheugen. Gooit bij een fout (zodat de beheerder het ziet). */
@@ -84,29 +85,54 @@ function extractTexts(data) {
   return out;
 }
 
+/** Zoekt lessen met de projecttag. Gooit bij een fout. Geeft ontdubbelde regels (zonder tag). */
+async function searchLessons(query) {
+  const c = cfg();
+  const tag = `[${c.project}]`;
+  const data = await request("POST", "/agentmemory/smart-search", {
+    query: `${c.project} ${query}`.slice(0, 500),
+    limit: 15,
+    project: c.project,
+  });
+  const seen = new Set();
+  const lines = [];
+  for (const raw of extractTexts(data)) {
+    if (!raw.includes(tag)) continue;
+    const line = raw.replace(tag, "").replace(/\s+/g, " ").trim();
+    if (!line || seen.has(line)) continue;
+    seen.add(line);
+    lines.push(line);
+  }
+  return lines;
+}
+
+/**
+ * Test de verbinding (slaat niets op). Geeft { ok, ms, lessons } terug;
+ * lessons = aantal gevonden lessen met de projecttag (null als zoeken niet lukte).
+ */
+export async function probeMemory() {
+  const t0 = Date.now();
+  await request("GET", "/agentmemory/sessions");
+  const ms = Date.now() - t0;
+  let lessons = null;
+  try {
+    lessons = (await searchLessons("")).length;
+  } catch {
+    lessons = null;
+  }
+  return { ok: true, ms, lessons };
+}
+
 /**
  * Zoek relevante lessen voor dit vak/document. Geeft een tekstblok terug (of "").
- * Enkel items met de projecttag worden gebruikt.
  */
 export async function recallLessons(query, maxChars = 2500) {
   if (!memoryActive()) return "";
-  const c = cfg();
-  const tag = `[${c.project}]`;
   try {
-    const data = await request("POST", "/agentmemory/smart-search", {
-      query: `${c.project} ${query}`.slice(0, 500),
-      limit: 15,
-      project: c.project,
-    });
-    const seen = new Set();
     const lines = [];
     let used = 0;
-    for (const raw of extractTexts(data)) {
-      if (!raw.includes(tag)) continue;
-      const line = raw.replace(tag, "").replace(/\s+/g, " ").trim();
-      if (!line || seen.has(line)) continue;
+    for (const line of await searchLessons(query)) {
       if (used + line.length > maxChars) break;
-      seen.add(line);
       used += line.length;
       lines.push(`- ${line}`);
     }

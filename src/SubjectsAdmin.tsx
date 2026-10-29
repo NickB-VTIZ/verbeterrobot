@@ -145,7 +145,7 @@ export default function SubjectsAdmin({ token, onUnauthorized }: Props) {
   const current = subjects.find(s => s.id === editId);
 
   return (
-    <div className="space-y-4 border-t border-gray-200 pt-6 mt-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-bold text-gray-900">Vakken & training</h3>
