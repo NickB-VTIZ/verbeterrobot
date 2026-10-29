@@ -1,7 +1,9 @@
-import { useState, useRef, useCallback, DragEvent, ChangeEvent } from "react";
+import { useState, useRef, useCallback, useEffect, DragEvent, ChangeEvent } from "react";
+import Admin from "./Admin";
 
 // ── Types ─────────────────────────────────────────────────────────────
-type Step = "login" | "upload" | "processing" | "done" | "error";
+type Step = "login" | "upload" | "processing" | "done" | "error" | "admin";
+type Role = "teacher" | "admin";
 
 interface ProcessingStage {
   id: string;
@@ -11,7 +13,6 @@ interface ProcessingStage {
 }
 
 const ACCEPTED = ".docx,.pdf,.pptx,.xlsx,.xls,.txt";
-const MAX_MB = 20;
 
 // ── SVG-icoontjes (inline, geen extra dep) ────────────────────────────
 function RobotIcon({ className = "" }: { className?: string }) {
@@ -80,6 +81,9 @@ function getFileIcon(name: string) {
 // ── Hoofd App ─────────────────────────────────────────────────────────
 export default function App() {
   const [step, setStep] = useState<Step>("login");
+  const [role, setRole] = useState<Role>("teacher");
+  const [token, setToken] = useState("");
+  const [maxMb, setMaxMb] = useState(20);
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -95,8 +99,14 @@ export default function App() {
   const [downloadName, setDownloadName] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef("");
-  passwordRef.current = password;
+
+  // Maximale bestandsgrootte komt uit het beheer
+  useEffect(() => {
+    fetch("/api/config")
+      .then(r => r.json())
+      .then(d => { if (typeof d.maxFileMb === "number") setMaxMb(d.maxFileMb); })
+      .catch(() => {});
+  }, [step]);
 
   // ── Aanmelden ───────────────────────────────────────────────────────
   async function handleLogin(e: React.FormEvent) {
@@ -104,15 +114,17 @@ export default function App() {
     setAuthError("");
     setAuthLoading(true);
     try {
-      const res = await fetch("/api/auth", {
+      const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ role, password }),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        setStep("upload");
+        setToken(data.token);
+        setPassword("");
+        setStep(data.role === "admin" ? "admin" : "upload");
       } else {
-        const data = await res.json().catch(() => ({}));
         setAuthError(data.error || "Ongeldig wachtwoord.");
       }
     } catch {
@@ -122,6 +134,22 @@ export default function App() {
     }
   }
 
+  function handleLogout() {
+    if (token) {
+      fetch("/api/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+    }
+    setToken("");
+    setPassword("");
+    handleReset();
+    setStep("login");
+  }
+
+  function sessionExpired() {
+    setToken("");
+    setAuthError("Sessie verlopen. Meld opnieuw aan.");
+    setStep("login");
+  }
+
   // ── Bestand selecteren ─────────────────────────────────────────────
   function validateFile(f: File): string {
     const allowed = ["docx", "pdf", "pptx", "xlsx", "xls", "txt"];
@@ -129,8 +157,8 @@ export default function App() {
     if (!allowed.includes(ext)) {
       return `Bestandstype .${ext} is niet toegelaten. Gebruik: ${allowed.map(e => `.${e}`).join(", ")}`;
     }
-    if (f.size > MAX_MB * 1024 * 1024) {
-      return `Bestand is te groot (max ${MAX_MB} MB).`;
+    if (f.size > maxMb * 1024 * 1024) {
+      return `Bestand is te groot (max ${maxMb} MB).`;
     }
     return "";
   }
@@ -192,15 +220,22 @@ export default function App() {
     try {
       const form = new FormData();
       form.append("file", file);
-      form.append("password", passwordRef.current);
       if (context.trim()) form.append("context", context.trim());
 
       advanceStage("upload", "parse");
 
-      const res = await fetch("/api/improve", { method: "POST", body: form });
+      const res = await fetch("/api/improve", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
 
       advanceStage("parse", "ai");
 
+      if (res.status === 401) {
+        sessionExpired();
+        return;
+      }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `Serverfout (${res.status})`);
@@ -237,7 +272,7 @@ export default function App() {
     setDownloadName("");
     setStages([]);
     setErrorMsg("");
-    setStep("upload");
+    setStep(role === "admin" && token ? "admin" : "upload");
   }
 
   // ── Render ─────────────────────────────────────────────────────────
@@ -250,11 +285,25 @@ export default function App() {
         <p className="text-gray-500 mt-1">Upload een taak of toets — de AI maakt de verbetersleutel</p>
       </div>
 
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-lg p-8">
+      <div className={`w-full ${step === "admin" ? "max-w-2xl" : "max-w-lg"} bg-white rounded-2xl shadow-lg p-8`}>
 
         {/* ── Stap 1: Aanmelden ── */}
         {step === "login" && (
           <form onSubmit={handleLogin} className="space-y-5">
+            <div className="grid grid-cols-2 gap-1 bg-gray-100 rounded-lg p-1">
+              {(["teacher", "admin"] as Role[]).map(r => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => { setRole(r); setAuthError(""); }}
+                  className={`rounded-md py-2 text-sm font-semibold transition-colors ${
+                    role === r ? "bg-white text-red-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {r === "teacher" ? "Leerkracht" : "Beheer"}
+                </button>
+              ))}
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Wachtwoord
@@ -263,7 +312,7 @@ export default function App() {
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                placeholder="Voer het leerkrachtenwachtwoord in"
+                placeholder={role === "admin" ? "Voer het beheerderswachtwoord in" : "Voer het leerkrachtenwachtwoord in"}
                 autoFocus
                 required
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
@@ -279,9 +328,29 @@ export default function App() {
           </form>
         )}
 
+        {/* ── Beheer ── */}
+        {step === "admin" && (
+          <Admin
+            token={token}
+            onUnauthorized={sessionExpired}
+            onUseTool={() => setStep("upload")}
+            onLogout={handleLogout}
+          />
+        )}
+
         {/* ── Stap 2: Upload ── */}
         {step === "upload" && (
           <div className="space-y-5">
+            <div className="flex justify-end gap-2 -mt-2">
+              {role === "admin" && (
+                <button type="button" onClick={() => setStep("admin")} className="text-xs text-red-600 hover:underline">
+                  ← Naar beheer
+                </button>
+              )}
+              <button type="button" onClick={handleLogout} className="text-xs text-gray-400 hover:text-gray-600 hover:underline">
+                Afmelden
+              </button>
+            </div>
             {/* Drop zone */}
             <div
               className={`drop-zone ${dragActive ? "active" : "hover:border-red-400 hover:bg-red-50/50"}`}
@@ -302,7 +371,7 @@ export default function App() {
                 Sleep een bestand hier of <span className="text-red-600 font-semibold">kies een bestand</span>
               </p>
               <p className="text-xs text-gray-400 mt-1">
-                .docx · .pdf · .pptx · .xlsx · .txt — max {MAX_MB} MB
+                .docx · .pdf · .pptx · .xlsx · .txt — max {maxMb} MB
               </p>
             </div>
 

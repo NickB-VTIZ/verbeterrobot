@@ -35,12 +35,30 @@ cp .env.example .env
 Vul in `.env`:
 
 ```env
-APP_PASSWORD=kies-een-sterk-wachtwoord
+ADMIN_PASSWORD=kies-een-sterk-beheerwachtwoord
+TEACHER_PASSWORD=startwachtwoord-voor-leerkrachten
 OMNIROUTE_BASE_URL=https://jouw-omniroute-url/v1
 OMNIROUTE_API_KEY=jouw-api-sleutel
 OMNIROUTE_MODEL=gpt-4o          # of een ander model dat Omniroute aanbiedt
 PORT=3010
 ```
+
+De waarden voor Omniroute en het leerkrachtenwachtwoord zijn **startwaarden**: wat je in het
+beheerscherm opslaat (bewaard in `data/settings.json`, in Docker het volume `/app/data`) heeft voorrang.
+`ADMIN_PASSWORD` kan enkel via `.env` gewijzigd worden.
+
+### Accounts
+
+| Account | Aanmelden met | Mag |
+|---|---|---|
+| **Beheer** | `ADMIN_PASSWORD` | Instellingen aanpassen + documenten verbeteren |
+| **Leerkracht** | leerkrachtenwachtwoord | Documenten verbeteren |
+
+### Instellingen in het beheer
+
+Omniroute-URL, API-sleutel (wordt nooit teruggestuurd naar de browser), model, temperatuur,
+maximale bestandsgrootte, systeemprompt en het leerkrachtenwachtwoord. Met "Verbinding testen"
+controleer je de Omniroute-instellingen.
 
 ### 3. Lokaal draaien (dev)
 
@@ -64,7 +82,7 @@ De app is bereikbaar op `http://<host>:3010`.
 ## Gebruik
 
 1. Open de app in de browser.
-2. Voer het gedeelde leerkrachtenwachtwoord in.
+2. Kies **Leerkracht** (of **Beheer**) en voer het bijbehorende wachtwoord in.
 3. Sleep een document in het uploadvenster of klik om een bestand te kiezen.
 4. Voeg optioneel extra instructies toe (bv. vak, graad, strengheid).
 5. Klik **"Verbetersleutel genereren"**.
@@ -75,7 +93,9 @@ De app is bereikbaar op `http://<host>:3010`.
 ## Veiligheidsnota's
 
 - Geüploade bestanden worden **onmiddellijk na verwerking verwijderd** van de server.
-- Stel altijd een sterk `APP_PASSWORD` in — niet `changeme`.
+- Stel altijd sterke wachtwoorden in voor `ADMIN_PASSWORD` en `TEACHER_PASSWORD`.
+- Het leerkrachtenwachtwoord uit het beheer wordt als scrypt-hash opgeslagen.
+- Na 10 mislukte aanmeldpogingen wordt een IP 15 minuten geblokkeerd; sessies vervallen na 12 uur of bij herstart van de server.
 - Bewaar `OMNIROUTE_API_KEY` enkel in `.env` (nooit in versiebeheer).
 
 ---

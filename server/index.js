@@ -9,6 +9,25 @@ import multer from "multer";
 import { parseDocument } from "./parser.js";
 import { getAnswersFromAI } from "./ai.js";
 import { injectAnswers } from "./injector.js";
+import {
+  getSettings,
+  publicSettings,
+  updateSettings,
+  verifyAdminPassword,
+  verifyTeacherPassword,
+  adminConfigured,
+  teacherConfigured,
+} from "./settings.js";
+import {
+  createSession,
+  destroySession,
+  requireRole,
+  sessionRole,
+  tokenFromReq,
+  loginAllowed,
+  registerFailure,
+  registerSuccess,
+} from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,24 +35,12 @@ const app = express();
 const PORT = process.env.PORT || 3010;
 const DIST = path.join(__dirname, "..", "dist");
 const UPLOADS = path.join(__dirname, "..", "uploads");
-const MAX_FILE_MB = parseInt(process.env.MAX_FILE_MB || "20", 10);
-const APP_PASSWORD = process.env.APP_PASSWORD || "";
 
 if (!fs.existsSync(UPLOADS)) fs.mkdirSync(UPLOADS, { recursive: true });
 
 // ── Multer ────────────────────────────────────────────────────────────
 const ALLOWED_EXTENSIONS = new Set([
   ".docx", ".pdf", ".pptx", ".xlsx", ".xls", ".txt",
-]);
-const ALLOWED_MIMES = new Set([
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
-  "text/plain",
-  // sommige browsers sturen application/octet-stream
-  "application/octet-stream",
 ]);
 
 const storage = multer.diskStorage({
@@ -44,17 +51,20 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({
-  storage,
-  limits: { fileSize: MAX_FILE_MB * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (!ALLOWED_EXTENSIONS.has(ext)) {
-      return cb(new Error(`Bestandstype '${ext}' is niet toegelaten.`));
-    }
-    cb(null, true);
-  },
-});
+/** Maakt per aanvraag een multer-instantie, zodat de limiet uit het beheer meteen geldt. */
+function makeUpload() {
+  return multer({
+    storage,
+    limits: { fileSize: getSettings().maxFileMb * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        return cb(new Error(`Bestandstype '${ext}' is niet toegelaten.`));
+      }
+      cb(null, true);
+    },
+  });
+}
 
 // ── Middleware ────────────────────────────────────────────────────────
 app.use(cors());
@@ -65,52 +75,112 @@ if (fs.existsSync(DIST)) {
   app.use(express.static(DIST));
 }
 
-// ── Auth middleware ───────────────────────────────────────────────────
-function requirePassword(req, res, next) {
-  const provided =
-    req.headers["x-app-password"] ||
-    req.body?.password ||
-    req.query?.password;
-
-  if (!APP_PASSWORD) {
-    return res
-      .status(500)
-      .json({ error: "APP_PASSWORD is niet ingesteld op de server." });
-  }
-  if (!provided || provided !== APP_PASSWORD) {
-    return res.status(401).json({ error: "Ongeldig wachtwoord." });
-  }
-  next();
-}
-
-// ── Health ────────────────────────────────────────────────────────────
+// ── Health & publieke config ──────────────────────────────────────────
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-// ── Auth check ────────────────────────────────────────────────────────
-app.post("/api/auth", express.json(), (req, res) => {
-  const { password } = req.body || {};
-  if (!APP_PASSWORD) {
-    return res.status(500).json({ error: "APP_PASSWORD niet ingesteld." });
+app.get("/api/config", (_req, res) =>
+  res.json({ maxFileMb: getSettings().maxFileMb })
+);
+
+// ── Aanmelden ─────────────────────────────────────────────────────────
+// Body: { role: "teacher" | "admin", password }
+app.post("/api/login", (req, res) => {
+  const ip = req.ip;
+  if (!loginAllowed(ip)) {
+    return res
+      .status(429)
+      .json({ error: "Te veel mislukte pogingen. Probeer het later opnieuw." });
   }
-  if (password === APP_PASSWORD) {
-    return res.json({ ok: true });
+
+  const { role, password } = req.body || {};
+  if (role !== "teacher" && role !== "admin") {
+    return res.status(400).json({ error: "Ongeldige rol." });
   }
-  return res.status(401).json({ error: "Ongeldig wachtwoord." });
+  if (typeof password !== "string" || !password) {
+    return res.status(400).json({ error: "Wachtwoord ontbreekt." });
+  }
+
+  if (role === "admin") {
+    if (!adminConfigured()) {
+      return res
+        .status(500)
+        .json({ error: "ADMIN_PASSWORD is niet ingesteld op de server." });
+    }
+  } else if (!teacherConfigured()) {
+    return res
+      .status(500)
+      .json({ error: "Er is nog geen leerkrachtenwachtwoord ingesteld." });
+  }
+
+  const ok =
+    role === "admin" ? verifyAdminPassword(password) : verifyTeacherPassword(password);
+  if (!ok) {
+    registerFailure(ip);
+    return res.status(401).json({ error: "Ongeldig wachtwoord." });
+  }
+
+  registerSuccess(ip);
+  return res.json({ ok: true, role, token: createSession(role) });
 });
 
-// ── Hoofdroute: verbetering ───────────────────────────────────────────
+app.post("/api/logout", (req, res) => {
+  destroySession(tokenFromReq(req));
+  res.json({ ok: true });
+});
+
+app.get("/api/session", (req, res) => {
+  const role = sessionRole(req);
+  if (!role) return res.status(401).json({ error: "Niet aangemeld." });
+  res.json({ role });
+});
+
+// ── Beheer ────────────────────────────────────────────────────────────
+app.get("/api/admin/settings", requireRole("admin"), (_req, res) =>
+  res.json(publicSettings())
+);
+
+app.put("/api/admin/settings", requireRole("admin"), (req, res) => {
+  try {
+    res.json(updateSettings(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Test de verbinding met Omniroute met de huidige (opgeslagen) instellingen
+app.post("/api/admin/test", requireRole("admin"), async (_req, res) => {
+  const cfg = getSettings();
+  try {
+    const fetch = (await import("node-fetch")).default;
+    const r = await fetch(`${cfg.omnirouteBaseUrl}/models`, {
+      headers: { Authorization: `Bearer ${cfg.omnirouteApiKey}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) {
+      const body = await r.text();
+      return res.status(502).json({
+        error: `Omniroute antwoordde met status ${r.status}: ${body.slice(0, 200)}`,
+      });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: `Verbinding mislukt: ${err.message}` });
+  }
+});
+
+// ── Hoofdroute: verbetering (leerkracht én beheerder) ─────────────────
 app.post(
   "/api/improve",
+  requireRole("teacher", "admin"),
   (req, res, next) => {
     // multer verwerkt multipart; daarna hebben we req.body
-    upload.single("file")(req, res, (err) => {
+    makeUpload().single("file")(req, res, (err) => {
       if (err) {
         return res.status(400).json({ error: err.message });
       }
       next();
     });
   },
-  requirePassword,
   async (req, res) => {
     const file = req.file;
     const extraContext = req.body?.context || "";
@@ -127,6 +197,7 @@ app.post(
       // 1. Tekst extraheren
       const text = await parseDocument(filePath, ext);
       if (!text || text.trim().length < 10) {
+        cleanup(filePath);
         return res
           .status(422)
           .json({ error: "Kon geen leesbare tekst uit het document halen." });
@@ -135,6 +206,7 @@ app.post(
       // 2. AI: antwoorden genereren
       const answers = await getAnswersFromAI(text, extraContext);
       if (!answers || answers.length === 0) {
+        cleanup(filePath);
         return res
           .status(422)
           .json({ error: "AI kon geen vragen vinden in het document." });
@@ -189,10 +261,13 @@ if (fs.existsSync(DIST)) {
 
 app.listen(PORT, () => {
   console.log(`✅ Verbeterrobot draait op http://localhost:${PORT}`);
-  if (!process.env.OMNIROUTE_API_KEY) {
-    console.warn("⚠️  OMNIROUTE_API_KEY is niet ingesteld in .env");
+  if (!getSettings().omnirouteApiKey) {
+    console.warn("⚠️  Geen Omniroute API-sleutel ingesteld (.env of beheer).");
   }
-  if (!process.env.APP_PASSWORD || process.env.APP_PASSWORD === "changeme") {
-    console.warn("⚠️  Stel een veilig APP_PASSWORD in via .env");
+  if (!adminConfigured()) {
+    console.warn("⚠️  ADMIN_PASSWORD is niet ingesteld: beheer is niet bereikbaar.");
+  }
+  if (!teacherConfigured()) {
+    console.warn("⚠️  Geen leerkrachtenwachtwoord (TEACHER_PASSWORD/APP_PASSWORD) ingesteld.");
   }
 });

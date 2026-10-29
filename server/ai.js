@@ -4,27 +4,7 @@
  * Geeft een array terug van { vraag, antwoord } objecten.
  */
 
-const BASE_URL = process.env.OMNIROUTE_BASE_URL || "https://omniroute.example.com/v1";
-const API_KEY  = process.env.OMNIROUTE_API_KEY  || "";
-const MODEL    = process.env.OMNIROUTE_MODEL    || "gpt-4o";
-
-const SYSTEM_PROMPT = `Je bent een ervaren leerkracht die een verbetersleutel opstelt.
-Je krijgt de volledige tekst van een taak of toets.
-Identificeer ALLE vragen (genummerd, geletterd, bullet of als zin geformuleerd).
-Los elke vraag correct en volledig op.
-
-Stuur je antwoord als een JSON-array, ZONDER Markdown-codefences, in dit formaat:
-[
-  { "vraag": "<letterlijke vraag of vraagnummer>", "antwoord": "<correct antwoord>" },
-  ...
-]
-
-Regels:
-- Gebruik dezelfde taal als het document.
-- Wees beknopt maar volledig.
-- Als een vraag meerdere deelvragen heeft, geef dan een antwoord per deelvraag als aparte objecten.
-- Verzin geen vragen die er niet zijn.
-- Als er geen vragen zijn, geef dan een lege array [].`;
+import { getSettings } from "./settings.js";
 
 /**
  * @param {string} documentText  Geëxtraheerde tekst van het document
@@ -33,6 +13,12 @@ Regels:
  */
 export async function getAnswersFromAI(documentText, extraContext = "") {
   const fetch = (await import("node-fetch")).default;
+  // Instellingen worden bij elke aanvraag opnieuw gelezen (aanpasbaar in beheer)
+  const cfg = getSettings();
+  const BASE_URL = cfg.omnirouteBaseUrl;
+  const API_KEY = cfg.omnirouteApiKey;
+  const MODEL = cfg.omnirouteModel;
+  const SYSTEM_PROMPT = cfg.systemPrompt;
 
   const userMessage = extraContext
     ? `Extra instructies van de leerkracht: ${extraContext}\n\n---\n\n${documentText}`
@@ -46,7 +32,7 @@ export async function getAnswersFromAI(documentText, extraContext = "") {
     },
     body: JSON.stringify({
       model: MODEL,
-      temperature: 0.2,
+      temperature: cfg.temperature,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user",   content: userMessage },

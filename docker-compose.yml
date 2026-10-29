@@ -9,9 +9,13 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      DATA_DIR: /app/data
     volumes:
       # Tijdelijke uploads — worden na verwerking automatisch verwijderd
       - verbeterrobot_uploads:/app/uploads
+      # Beheerinstellingen (settings.json) blijven bewaard bij updates
+      - verbeterrobot_data:/app/data
 
 volumes:
   verbeterrobot_uploads:
+  verbeterrobot_data:

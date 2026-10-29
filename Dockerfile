@@ -14,7 +14,7 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 # Server-code
 COPY server ./server
-RUN mkdir -p uploads
+RUN mkdir -p uploads data
 
 ENV NODE_ENV=production
 EXPOSE 3010
