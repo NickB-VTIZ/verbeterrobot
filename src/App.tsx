@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, DragEvent, ChangeEvent } from "react";
 import Admin from "./Admin";
+import { RobotMascot, ThoughtBubble, WorkflowSteps, PromptBlocks, Mood } from "./RobotMascot";
 
 // ── Types ─────────────────────────────────────────────────────────────
 type Step = "login" | "upload" | "processing" | "done" | "error" | "admin";
@@ -307,14 +308,79 @@ export default function App() {
     setStep(role === "admin" && token ? "admin" : "upload");
   }
 
+  // ── Robot: stemming, denkballon en workflow ─────────────────────────
+  const activeStageId = stages.find(s => s.active)?.id;
+  const mood: Mood =
+    step === "processing" ? "thinking" : step === "done" ? "happy" : step === "error" ? "sad" : "idle";
+
+  let bubbleMessages: string[];
+  if (step === "login") {
+    bubbleMessages = ["Hoi! Ik ben de Verbeterrobot 🤖", "Meld je aan en ik help je met verbeteren."];
+  } else if (step === "admin") {
+    bubbleMessages = [
+      "Welkom in het beheer! Hier leer je me hoe ik moet verbeteren.",
+      "Maak vakken aan met onderwerpen en voorbeelden — dan verbeter ik gerichter.",
+    ];
+  } else if (step === "upload") {
+    if (!file) {
+      bubbleMessages = [
+        "Geef me een toets of taak, dan maak ik de verbetersleutel.",
+        "Ik begrijp .docx, .pdf, .pptx, .xlsx en .txt.",
+      ];
+    } else if (subjects.length > 0 && !selectedSubject) {
+      bubbleMessages = ["Mooi bestand! Kies eventueel een vak, dan verbeter ik gerichter."];
+    } else if (selectedSubject && selectedSubject.onderwerpen.length > 0 && topics.length === 0) {
+      bubbleMessages = [`${selectedSubject.naam}, top! Duid aan welke onderwerpen aan bod komen.`];
+    } else {
+      bubbleMessages = ["Ik ben er klaar voor — druk maar op de knop! 🚀"];
+    }
+  } else if (step === "processing") {
+    const vak = selectedSubject ? ` over ${selectedSubject.naam}` : "";
+    if (activeStageId === "upload") bubbleMessages = ["Ik pak je bestand uit…"];
+    else if (activeStageId === "parse") bubbleMessages = ["Ik lees alle vragen één voor één…", "Welke vragen staan hier allemaal in?"];
+    else if (activeStageId === "ai") {
+      bubbleMessages = [
+        "Hmm, even nadenken…",
+        selectedSubject ? `Ik zoek in wat ik weet${vak}…` : "Ik los elke vraag zorgvuldig op…",
+        "Ik reken alles twee keer na 🧮",
+        "Tussenstappen netjes noteren…",
+      ];
+    } else if (activeStageId === "inject") bubbleMessages = ["Ik pak mijn rode stift 🖍️", "Antwoorden bij de juiste vragen zetten…"];
+    else bubbleMessages = ["Bijna klaar…"];
+  } else if (step === "done") {
+    bubbleMessages = ["Klaar! Je verbetersleutel staat klaar 🎉", "Controleer de rode antwoorden altijd even zelf."];
+  } else {
+    bubbleMessages = ["Oeps… er ging iets mis. Probeer het gerust opnieuw."];
+  }
+
+  // 1 = upload, 2 = vak & onderwerp, 3 = AI denkt, 4 = rode sleutel, 5 = klaar
+  const workflowActive =
+    step === "upload"
+      ? file ? 2 : 1
+      : step === "processing"
+      ? activeStageId === "inject" || activeStageId === "ready" ? 4 : 3
+      : step === "done"
+      ? 5
+      : step === "error"
+      ? 3
+      : 0;
+
   // ── Render ─────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-gray-50 to-red-50">
-      {/* Header */}
-      <div className="mb-8 text-center">
-        <RobotIcon className="w-16 h-16 text-red-600 mx-auto mb-3" />
-        <h1 className="text-3xl font-bold text-gray-900">Verbeterrobot</h1>
-        <p className="text-gray-500 mt-1">Upload een taak of toets — de AI maakt de verbetersleutel</p>
+      {/* Header: robot met denkballon */}
+      <div className={`mb-6 w-full ${step === "admin" ? "max-w-2xl" : "max-w-lg"}`}>
+        <h1 className="text-3xl font-bold text-gray-900 text-center">Verbeterrobot</h1>
+        <p className="text-gray-500 mt-1 text-center text-sm">Upload een taak of toets — de AI maakt de verbetersleutel</p>
+        <div className="flex items-center gap-6 mt-5 pl-4">
+          <RobotMascot mood={mood} className="w-24 h-28 shrink-0" />
+          <ThoughtBubble messages={bubbleMessages} thinking={step === "processing"} />
+        </div>
+        {workflowActive > 0 && (
+          <div className="mt-5 px-1">
+            <WorkflowSteps active={workflowActive} />
+          </div>
+        )}
       </div>
 
       <div className={`w-full ${step === "admin" ? "max-w-2xl" : "max-w-lg"} bg-white rounded-2xl shadow-lg p-8`}>
@@ -489,6 +555,15 @@ export default function App() {
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
               />
             </div>
+
+            <PromptBlocks
+              parts={{
+                hasFile: !!file,
+                subject: selectedSubject?.naam,
+                topicCount: topics.length,
+                hasContext: context.trim().length > 0,
+              }}
+            />
 
             <button
               onClick={handleImprove}
