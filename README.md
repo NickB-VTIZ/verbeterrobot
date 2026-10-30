@@ -172,6 +172,30 @@ Instellingen: in het beheer (tab *Verbindingen*) of met `VISUAL_CHECK=on|off` en
 
 > Let op: door LibreOffice en poppler wordt het Docker-image enkele honderden MB groter. Wil je dat niet, zet dan `VISUAL_CHECK=off` of verwijder de `apk add`-regel in de `Dockerfile`.
 
+### Bibliotheek, aanduiden en opslag (vanaf v1.7.0)
+
+**Permanente opslag.** Elk geüpload document wordt bewaard in `DATA_DIR/documents/<uuid>/` (UUID-bestandsnamen, SHA-256-controlesom).
+Metadata, versies, aanduidingen, feedback, LLM-aanroepen en het auditlog staan in SQLite (`DATA_DIR/verbeterrobot.db`).
+Per document zijn er meerdere versies van de sleutel; elke versie bewaart de gebruikte slots, vragen en kwaliteitscontrole. Voorbeeldafbeeldingen (previews) van origineel en sleutel worden op de achtergrond met LibreOffice gemaakt.
+
+**Bibliotheek.** Na het aanmelden (leerkrachten geven hun naam in) zie je je documenten als raster of lijst, met zoeken, filters (vak, leerjaar, richting, schooljaar, status, tags), groeperen, meervoudige selectie en slepen-en-neerzetten. Het scherm werkt op tablet en in licht én donker thema.
+Op de detailpagina staan origineel en sleutel naast elkaar, alle versies (vergelijken, activeren, goedkeuren), het aanduidingenscherm, de feedbackgeschiedenis, de LLM-kost en de metadata. Acties: downloaden (origineel, sleutel, beide als zip), opnieuw genereren, dupliceren, als sjabloon bewaren en tags beheren.
+
+**Aanduiden (probleem 2).** Je duidt per paragraaf aan wat het is: *vraag, antwoordplaats, gegeven, formuleblad, modelantwoord* of *instructie*. De AI kan een voorstel doen dat je kan aanvullen of overnemen. Je kan per vraag ook zelf een antwoord invullen; dat heeft voorrang op wat de AI berekent. Na het genereren kan je elk antwoord goedkeuren, aanpassen of laten hergenereren; aanpassingen worden als feedback bewaard (basis voor latere personalisatie, zie `docs/personalisatie.md`).
+Een antwoord komt **nooit** aan het einde van het document terecht: is er voor een vraag geen geldige plaats, dan wordt dat gelogd en staat de vraag op de lijst *handmatig nakijken*.
+
+**Prullenbak en bewaartermijn.** Verwijderen is eerst zacht (prullenbak). Na `TRASH_RETENTION_DAYS` dagen (standaard 30) worden documenten automatisch definitief verwijderd. Bij definitief verwijderen zie je eerst hoeveel bestanden en ruimte dat vrijmaakt, en kies je of de voorbeelden uit correcties bewaard blijven. Alles komt in het auditlog.
+
+**Beheer, tab *Overzicht*.** Opslaggebruik, aantal documenten per leerkracht, AI-kosten per maand/vak/leerkracht (stel `LLM_PRICE_IN_PER_1M` en `LLM_PRICE_OUT_PER_1M` in, in euro per miljoen tokens), de lijst met voorbeelden (verwijderbaar), het auditlog en een knop om de prullenbak nu op te ruimen.
+
+**Back-up en herstel.** De service `backup` in `docker-compose.yml` maakt dagelijks een back-up van database en bestanden naar het volume `verbeterrobot_backups`.
+- `BACKUP_RETENTION_DAYS` (standaard 14) en `BACKUP_HOUR` (standaard 3 u) regelen bewaartermijn en tijdstip.
+- Meteen een back-up: `docker compose run --rm backup node scripts/backup.mjs`.
+- Beschikbare back-ups: `docker compose run --rm backup node scripts/restore.mjs --list`.
+- Herstellen: `docker compose stop app`, daarna `docker compose run --rm backup node scripts/restore.mjs <naam|latest> --yes`, daarna `docker compose start app`.
+
+**Tests** (zonder LLM): `npm test` (aanduidingen, docx-pipeline, opslag, bibliotheek-API).
+
 ### Systeemprompt
 
 Schrijf in het beheer enkel de inhoudelijke richtlijnen (vakconventies, notatie, werkwijze bij berekeningen).
@@ -185,17 +209,17 @@ De app is bereikbaar op `http://<host>:3010`.
 ## Gebruik
 
 1. Open de app in de browser.
-2. Kies **Leerkracht** (of **Beheer**) en voer het bijbehorende wachtwoord in.
-3. Sleep een document in het uploadvenster of klik om een bestand te kiezen.
-4. Voeg optioneel extra instructies toe (bv. vak, graad, strengheid).
-5. Klik **"Verbetersleutel genereren"**.
-6. Download het verbeterde document — zelfde bestandsnaam, zelfde opmaak, antwoorden in rood.
+2. Kies **Leerkracht** (geef je naam) of **Beheer** en voer het bijbehorende wachtwoord in.
+3. Klik in de bibliotheek op **Nieuw document** (of sleep een bestand in het scherm) en vul vak, leerjaar en schooljaar in.
+4. Duid aan wat vraag, antwoordplaats en gegeven is (of laat de AI een voorstel doen) en klik **Bewaar en maak sleutel**.
+5. Controleer de antwoorden, pas aan of keur goed.
+6. Download de sleutel — zelfde opmaak, antwoorden in rood. De snelle werkwijze zonder bibliotheek (*Snel document verbeteren*) blijft beschikbaar.
 
 ---
 
 ## Veiligheidsnota's
 
-- Geüploade bestanden worden **onmiddellijk na verwerking verwijderd** van de server.
+- Documenten uit de bibliotheek worden bewaard tot ze (na de prullenbak) definitief verwijderd worden; bestanden uit de snelle werkwijze worden na verwerking verwijderd. Leerkrachten zien enkel hun eigen documenten.
 - Stel altijd sterke wachtwoorden in voor `ADMIN_PASSWORD` en `TEACHER_PASSWORD`.
 - Het leerkrachtenwachtwoord uit het beheer wordt als scrypt-hash opgeslagen.
 - Na 10 mislukte aanmeldpogingen wordt een IP 15 minuten geblokkeerd; sessies vervallen na 12 uur of bij herstart van de server.

@@ -13,9 +13,30 @@ services:
     volumes:
       # Tijdelijke uploads — worden na verwerking automatisch verwijderd
       - verbeterrobot_uploads:/app/uploads
-      # Beheerinstellingen en vakprofielen (settings.json, subjects.json) blijven bewaard bij updates
+      # Alles wat permanent bewaard wordt: database (verbeterrobot.db), documentbestanden (store/),
+      # beheerinstellingen en vakprofielen. Blijft bewaard bij updates.
       - verbeterrobot_data:/app/data
+
+  # Dagelijkse back-up van database + bestanden naar het volume verbeterrobot_backups.
+  # Bewaartermijn: BACKUP_RETENTION_DAYS (standaard 14), tijdstip: BACKUP_HOUR (standaard 3 u).
+  # Eenmalig uitvoeren:  docker compose run --rm backup node scripts/backup.mjs
+  # Herstellen: zie README (docker compose stop app → restore → start app).
+  backup:
+    image: ghcr.io/nickb-vtiz/verbeterrobot:${APP_VERSION:-latest}
+    container_name: verbeterrobot-backup
+    restart: unless-stopped
+    command: ["node", "scripts/backup.mjs", "--loop"]
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /app/data
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+    volumes:
+      - verbeterrobot_data:/app/data
+      - verbeterrobot_backups:/backups
 
 volumes:
   verbeterrobot_uploads:
   verbeterrobot_data:
+  verbeterrobot_backups:

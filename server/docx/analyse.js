@@ -39,7 +39,7 @@ Regels:
  * @param {any} parsed
  * @param {Array<ParagraphInfo>} paragraphs
  */
-export function validateAnalysis(parsed, paragraphs) {
+export function validateAnalysis(parsed, paragraphs, { collect = false, skipCoverage = false } = {}) {
   const byId = new Map(paragraphs.map((p, i) => [p.id, { p, i }]));
   const list = Array.isArray(parsed) ? parsed : parsed?.questions;
   if (!Array.isArray(list)) throw new Error('Verwacht {"questions":[...]}.');
@@ -127,11 +127,15 @@ export function validateAnalysis(parsed, paragraphs) {
     }
   });
 
-  for (const p of paragraphs) {
-    if (p.placeholders > 0 && !covered.has(p.id)) {
-      errors.push(`Paragraaf ${p.id} heeft ${p.placeholders} invulpunt(en) maar zit in geen enkel fill_placeholders-slot.`);
+  if (!skipCoverage) {
+    for (const p of paragraphs) {
+      if (p.placeholders > 0 && !covered.has(p.id)) {
+        errors.push(`Paragraaf ${p.id} heeft ${p.placeholders} invulpunt(en) maar zit in geen enkel fill_placeholders-slot.`);
+      }
     }
   }
+  // collect: geef geldige vragen + de fouten terug (voor de aanduidingen van de leerkracht)
+  if (collect) return { questions, errors };
   if (errors.length) throw new Error(errors.slice(0, 15).join("\n"));
   return questions;
 }

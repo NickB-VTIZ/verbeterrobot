@@ -1,6 +1,6 @@
 {
   "name": "verbeterrobot",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "type": "module",
   "description": "Verbeterrobot — AI-gestuurde verbetersleutelgenerator voor leerkrachten",
@@ -9,10 +9,15 @@
     "dev:client": "vite",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build": "vite build",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "test": "node scripts/test-marks.mjs && node scripts/test-docx-pipeline.mjs && node scripts/test-storage.mjs && node scripts/test-library.mjs",
+    "backup": "node scripts/backup.mjs",
+    "restore": "node scripts/restore.mjs"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.8.15",
+    "archiver": "^8.0.0",
+    "better-sqlite3": "^13.0.3",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

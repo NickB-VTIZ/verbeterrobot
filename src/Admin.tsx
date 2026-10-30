@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createApi } from "./api";
+import AdminOverview from "./AdminOverview";
 import SubjectsAdmin from "./SubjectsAdmin";
 import TrainingAdmin from "./TrainingAdmin";
 
@@ -61,10 +63,11 @@ interface Status {
   maxFileMb: number;
 }
 
-type Tab = "status" | "verbindingen" | "instellingen" | "vakken" | "training";
+type Tab = "status" | "overzicht" | "verbindingen" | "instellingen" | "vakken" | "training";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "status", label: "Status" },
+  { id: "overzicht", label: "Overzicht" },
   { id: "verbindingen", label: "Verbindingen" },
   { id: "instellingen", label: "Instellingen" },
   { id: "vakken", label: "Vakken" },
@@ -143,6 +146,7 @@ function ResultLine({ r, kind }: { r: TestResult | null; kind: "omniroute" | "me
 
 export default function Admin({ token, version, onUnauthorized, onUseTool, onLogout }: Props) {
   const [tab, setTab] = useState<Tab>("status");
+  const adminApi = useMemo(() => createApi(token, onUnauthorized), [token, onUnauthorized]);
   const [loaded, setLoaded] = useState<PublicSettings | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
 
@@ -743,6 +747,7 @@ export default function Admin({ token, version, onUnauthorized, onUseTool, onLog
         </form>
       )}
 
+      {tab === "overzicht" && <AdminOverview api={adminApi} />}
       {tab === "vakken" && <SubjectsAdmin token={token} onUnauthorized={onUnauthorized} />}
       {tab === "training" && <TrainingAdmin token={token} onUnauthorized={onUnauthorized} />}
     </div>

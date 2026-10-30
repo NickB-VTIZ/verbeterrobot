@@ -197,6 +197,8 @@ function asText(v) {
  */
 export function applySlots(doc, paragraphs, slots) {
   const warnings = [];
+  /** Slots die nergens geplaatst konden worden → "handmatig nakijken" (nooit tekst achteraan). */
+  const unplaced = [];
   const stats = { inserted: 0 };
   const byId = new Map(paragraphs.map((p, i) => [p.id, { info: p, index: i }]));
 
@@ -208,27 +210,44 @@ export function applySlots(doc, paragraphs, slots) {
   let applied = 0;
   for (const { s, pos } of ordered) {
     if (pos < 0) {
-      warnings.push(`Onbekende paragraaf-ID '${s.para_id}' (slot ${s.type}) overgeslagen.`);
+      // Geen geldige plaats: NOOIT als fallback achteraan toevoegen.
+      unplaced.push({
+        para_id: s.para_id,
+        type: s.type,
+        reason: `Onbekende paragraaf-ID '${s.para_id}': antwoord kon nergens geplaatst worden.`,
+      });
+      warnings.push(`Onbekende paragraaf-ID '${s.para_id}' (slot ${s.type}) niet geplaatst.`);
       continue;
     }
     const info = byId.get(s.para_id).info;
     const p = info._node;
+    if (!p || !p.parentNode) {
+      unplaced.push({ para_id: s.para_id, type: s.type, reason: "Paragraaf niet meer in het document aanwezig." });
+      continue;
+    }
     switch (s.type) {
       case "fill_placeholders": {
         const values = asArray(s.content);
         if (fillPlaceholders(doc, p, values, warnings) > 0) applied++;
+        else unplaced.push({ para_id: s.para_id, type: s.type, reason: "Geen invulpunt ingevuld in deze paragraaf." });
         break;
       }
       case "append": {
         const text = asText(s.content).trim();
-        if (!text) break;
+        if (!text) {
+          unplaced.push({ para_id: s.para_id, type: s.type, reason: "Leeg antwoord." });
+          break;
+        }
         appendRed(doc, p, text, info.isList);
         applied++;
         break;
       }
       case "fill_cell": {
         const text = asText(s.content).trim();
-        if (!text) break;
+        if (!text) {
+          unplaced.push({ para_id: s.para_id, type: s.type, reason: "Leeg antwoord." });
+          break;
+        }
         if (info.isEmpty) {
           p.appendChild(makeRun(doc, text, baseRPr(p), { red: true }));
         } else {
@@ -239,14 +258,27 @@ export function applySlots(doc, paragraphs, slots) {
       }
       case "insert_after": {
         const text = asText(s.content).trim();
-        if (!text) break;
-        insertParagraphAfter(doc, p, text, stats);
+        if (!text) {
+          unplaced.push({ para_id: s.para_id, type: s.type, reason: "Leeg antwoord." });
+          break;
+        }
+        const np = insertParagraphAfter(doc, p, text, stats);
+        if (np.previousSibling !== p) {
+          // Zou nooit mogen gebeuren; liever een fout dan een antwoord op de verkeerde plaats.
+          np.parentNode.removeChild(np);
+          stats.inserted--;
+          unplaced.push({ para_id: s.para_id, type: s.type, reason: "Invoegpositie klopte niet; niet geplaatst." });
+          break;
+        }
         applied++;
         break;
       }
       case "fill_empty_following": {
         const values = asArray(s.content).filter((v) => v.trim() !== "");
-        if (values.length === 0) break;
+        if (values.length === 0) {
+          unplaced.push({ para_id: s.para_id, type: s.type, reason: "Leeg antwoord." });
+          break;
+        }
         // Volgende aaneensluitende lege paragrafen (geen paginascheiding)
         const empties = [];
         for (let i = pos + 1; i < paragraphs.length && empties.length < values.length; i++) {
@@ -277,9 +309,10 @@ export function applySlots(doc, paragraphs, slots) {
       }
       default:
         warnings.push(`Onbekend slot-type '${s.type}' voor ${s.para_id} overgeslagen.`);
+        unplaced.push({ para_id: s.para_id, type: s.type, reason: `Onbekend slot-type '${s.type}'.` });
     }
   }
-  return { applied, warnings, insertedParagraphs: stats.inserted };
+  return { applied, warnings, unplaced, insertedParagraphs: stats.inserted };
 }
 
 /** Serialiseert de DOM en verwijdert de interne _vr_id-markeringen. */

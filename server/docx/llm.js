@@ -4,6 +4,7 @@
  */
 
 import { getSettings } from "../settings.js";
+import { recordLlmCall } from "../storage/llmlog.js";
 
 /**
  * Haalt een JSON-object (of array) uit een modelantwoord, ook met codefences of extra tekst.
@@ -67,18 +68,35 @@ export async function chat(messages, { temperature, json = true, model } = {}) {
     });
   }
 
-  let response = await post(body);
-  // Niet elk model ondersteunt JSON-modus: probeer opnieuw zonder response_format
-  if (!response.ok && json && [400, 422].includes(response.status)) {
-    delete body.response_format;
+  const started = Date.now();
+  let response;
+  try {
     response = await post(body);
+    // Niet elk model ondersteunt JSON-modus: probeer opnieuw zonder response_format
+    if (!response.ok && json && [400, 422].includes(response.status)) {
+      delete body.response_format;
+      response = await post(body);
+    }
+  } catch (err) {
+    recordLlmCall({ messages, model: body.model, durationMs: Date.now() - started, error: err.message });
+    throw err;
   }
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Omniroute API-fout (${response.status}): ${text.slice(0, 300)}`);
+    const msg = `Omniroute API-fout (${response.status}): ${text.slice(0, 300)}`;
+    recordLlmCall({ messages, model: body.model, durationMs: Date.now() - started, error: msg });
+    throw new Error(msg);
   }
   const data = await response.json();
-  return data?.choices?.[0]?.message?.content || "";
+  const content = data?.choices?.[0]?.message?.content || "";
+  recordLlmCall({
+    messages,
+    response: content,
+    model: data?.model || body.model,
+    usage: data?.usage,
+    durationMs: Date.now() - started,
+  });
+  return content;
 }
 
 /**

@@ -33,11 +33,19 @@ Antwoord UITSLUITEND met JSON:
 {"qid":"...","steps":"korte uitleg van de oplossing","checks":[...],"slot_values":[{"para_id":"p_004","content":["..."]}]}
 Geen tekst buiten de JSON.`;
 
-function buildQuestionPrompt(q, byId) {
+function buildQuestionPrompt(q, byId, { teacherAnswer = "", comment = "", previous = "" } = {}) {
   const paraText = (id) => byId.get(id)?.text ?? "";
   const lines = [];
   lines.push(`Vraag ${q.qid}`);
   if (q.context) lines.push(`Context: ${q.context}`);
+  if (teacherAnswer) {
+    lines.push(
+      "De leerkracht gaf zelf het verwachte antwoord/de gewenste notatie voor deze vraag (heeft VOORRANG op je eigen aanpak; " +
+        `gebruik exact deze waarden en schrijfwijze in de slots):\n${teacherAnswer}`
+    );
+  }
+  if (previous) lines.push(`Eerder voorgesteld antwoord (wordt door de leerkracht afgekeurd):\n${previous}`);
+  if (comment) lines.push(`Opmerking van de leerkracht bij het opnieuw maken:\n${comment}`);
   lines.push("Opgave (paragrafen):");
   const ids = [...new Set([...q.question_para_ids, ...q.slots.map((s) => s.para_id)])];
   for (const id of ids) lines.push(`  [${id}] ${paraText(id)}`);
@@ -118,11 +126,19 @@ export function validateSolution(parsed, q) {
  * @returns {Promise<{qid, slots:Array, steps, flagged:boolean, issues:string[]}>}
  */
 export async function solveQuestion(q, byId, opts = {}) {
-  const { systemPrompt = "", subjectContext = "", extraContext = "", maxFix = 2 } = opts;
+  const {
+    systemPrompt = "",
+    subjectContext = "",
+    extraContext = "",
+    maxFix = 2,
+    teacherAnswer = "",
+    comment = "",
+    previous = "",
+  } = opts;
   const system = [systemPrompt, subjectContext, SOLVE_RULES].filter(Boolean).join("\n\n");
   const user =
     (extraContext ? `Extra instructies van de leerkracht: ${extraContext}\n\n` : "") +
-    buildQuestionPrompt(q, byId);
+    buildQuestionPrompt(q, byId, { teacherAnswer, comment, previous });
 
   const messages = [
     { role: "system", content: system },

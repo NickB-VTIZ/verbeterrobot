@@ -5,11 +5,13 @@
 import { randomBytes } from "crypto";
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 uur
-const sessions = new Map(); // token -> { role, expires }
+const sessions = new Map(); // token -> { role, name, expires }
 
-export function createSession(role) {
+/** Naam van de gebruiker (leerkracht/beheerder) wordt bewaard voor eigenaarschap en audit. */
+export function createSession(role, name = "") {
   const token = randomBytes(32).toString("hex");
-  sessions.set(token, { role, expires: Date.now() + SESSION_TTL_MS });
+  const clean = String(name || "").trim().replace(/\s+/g, " ").slice(0, 60);
+  sessions.set(token, { role, name: clean || (role === "admin" ? "Beheerder" : "Leerkracht"), expires: Date.now() + SESSION_TTL_MS });
   return token;
 }
 
@@ -41,8 +43,13 @@ export function requireRole(...roles) {
     if (!s) return res.status(401).json({ error: "Niet aangemeld of sessie verlopen." });
     if (!roles.includes(s.role)) return res.status(403).json({ error: "Onvoldoende rechten." });
     req.role = s.role;
+    req.user = s.name;
     next();
   };
+}
+
+export function sessionUser(req) {
+  return getSession(tokenFromReq(req))?.name ?? null;
 }
 
 export function sessionRole(req) {

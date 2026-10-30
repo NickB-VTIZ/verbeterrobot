@@ -46,6 +46,10 @@ function envDefaults() {
     memoryUrl: (process.env.AGENTMEMORY_URL || "").replace(/\/+$/, ""),
     memorySecret: process.env.AGENTMEMORY_SECRET || "",
     memoryProject: process.env.AGENTMEMORY_PROJECT || "verbeterrobot",
+    trashRetentionDays: parseInt(process.env.TRASH_RETENTION_DAYS || "30", 10),
+    // Prijs per 1 miljoen tokens (EUR) voor de kostenraming; 0 = niet berekenen.
+    priceInPer1M: Number(process.env.LLM_PRICE_IN_PER_1M || 0),
+    priceOutPer1M: Number(process.env.LLM_PRICE_OUT_PER_1M || 0),
   };
 }
 
@@ -135,6 +139,9 @@ export function publicSettings() {
     hasMemorySecret: !!s.memorySecret,
     memorySecretHint: s.memorySecret ? `••••${s.memorySecret.slice(-4)}` : "",
     memoryProject: s.memoryProject,
+    trashRetentionDays: s.trashRetentionDays,
+    priceInPer1M: s.priceInPer1M,
+    priceOutPer1M: s.priceOutPer1M,
   };
 }
 
@@ -189,6 +196,19 @@ export function updateSettings(input = {}) {
     next.teacherPasswordHash = hashPassword(pw);
   }
   if (input.resetTeacherPassword) delete next.teacherPasswordHash;
+
+  if (input.trashRetentionDays !== undefined) {
+    const n = parseInt(input.trashRetentionDays, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 3650) throw new Error("Bewaartermijn prullenbak: 1 tot 3650 dagen.");
+    next.trashRetentionDays = n;
+  }
+  for (const k of ["priceInPer1M", "priceOutPer1M"]) {
+    if (input[k] !== undefined) {
+      const n = Number(input[k]);
+      if (!Number.isFinite(n) || n < 0 || n > 10000) throw new Error("Tokenprijs moet tussen 0 en 10000 liggen.");
+      next[k] = n;
+    }
+  }
 
   if (input.memoryEnabled !== undefined) next.memoryEnabled = !!input.memoryEnabled;
   if (input.memoryUrl !== undefined) {

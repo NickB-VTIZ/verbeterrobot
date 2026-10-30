@@ -28,6 +28,70 @@
   }
 }
 
+/* ── Donkere modus ───────────────────────────────────────────────────
+   Eén centrale plek: de bestaande lichte utility-klassen worden onder
+   `.dark` herkleurd, zodat alle schermen (ook beheer) meteen meekleuren. */
+html.dark { color-scheme: dark; }
+.dark body { background-color: #0f172a; color: #e5e7eb; }
+.dark .bg-white { background-color: #1e293b; }
+.dark .bg-gray-50 { background-color: #172033; }
+.dark .bg-gray-100 { background-color: #273449; }
+.dark .bg-gray-200 { background-color: #334155; }
+.dark .from-gray-50 { --tw-gradient-from: #0f172a var(--tw-gradient-from-position); --tw-gradient-to: rgb(15 23 42 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .to-red-50 { --tw-gradient-to: #2a1517 var(--tw-gradient-to-position); }
+.dark .bg-red-50 { background-color: #3b1d20; }
+.dark .bg-red-100 { background-color: #4c2024; }
+.dark .bg-green-50 { background-color: #12301f; }
+.dark .bg-green-100 { background-color: #14402a; }
+.dark .bg-amber-50 { background-color: #3a2c10; }
+.dark .bg-blue-50 { background-color: #14284a; }
+.dark .bg-yellow-50 { background-color: #3a3310; }
+.dark .text-gray-900 { color: #f1f5f9; }
+.dark .text-gray-800 { color: #e2e8f0; }
+.dark .text-gray-700 { color: #cbd5e1; }
+.dark .text-gray-600 { color: #b6c2d1; }
+.dark .text-gray-500 { color: #94a3b8; }
+.dark .text-gray-400 { color: #8190a5; }
+.dark .text-red-700, .dark .text-red-600 { color: #f87171; }
+.dark .text-green-700, .dark .text-green-600 { color: #4ade80; }
+.dark .text-amber-800, .dark .text-amber-900 { color: #fcd34d; }
+.dark .text-blue-900 { color: #bfdbfe; }
+.dark .border-gray-100 { border-color: #263244; }
+.dark .border-gray-200 { border-color: #334155; }
+.dark .border-gray-300 { border-color: #475569; }
+.dark .border-red-200 { border-color: #7f2d33; }
+.dark .border-amber-200 { border-color: #6b5316; }
+.dark .border-blue-200 { border-color: #1e3a6b; }
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #263244; }
+.dark .hover\:bg-gray-50:hover { background-color: #273449; }
+.dark .hover\:bg-red-50\/50:hover { background-color: rgb(127 29 29 / 0.25); }
+.dark input, .dark select, .dark textarea { background-color: #0f172a; color: #e5e7eb; }
+.dark input::placeholder, .dark textarea::placeholder { color: #64748b; }
+.dark .btn-secondary { background-color: #1e293b; color: #e2e8f0; border-color: #475569; }
+.dark .btn-secondary:hover { background-color: #273449; }
+.dark .drop-zone { border-color: #475569; }
+.dark .drop-zone.active { background-color: #3b1d20; }
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent bg-white;
+  }
+  .btn-sm {
+    @apply inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+  }
+  .btn-sm-red {
+    @apply inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+  }
+  .chip {
+    @apply inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600;
+  }
+  .card {
+    @apply bg-white rounded-xl border border-gray-200 shadow-sm;
+  }
+}
+.dark .btn-sm { background-color: #1e293b; color: #e2e8f0; border-color: #475569; }
+.dark .btn-sm:hover { background-color: #273449; }
+
 /* ── Robot-animaties ─────────────────────────────────────────────── */
 @keyframes robot-float  { 0%,100% { transform: translateY(0); }  50% { transform: translateY(-4px); } }
 @keyframes robot-hop    { 0%,100% { transform: translateY(0); }  50% { transform: translateY(-9px); } }

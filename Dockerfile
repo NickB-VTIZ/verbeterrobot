@@ -1,11 +1,12 @@
-FROM node:20-alpine AS builder
+# Node 22: vereist door better-sqlite3 (SQLite met FTS5)
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 # Visuele controle: LibreOffice (docx -> pdf), poppler (pdf -> png) en lettertypen.
 # Dit maakt het image een stuk groter (enkele honderden MB). Uitzetten kan
@@ -20,6 +21,8 @@ COPY --from=builder /app/dist ./dist
 # Server-code
 COPY server ./server
 RUN mkdir -p uploads data
+# Back-upscript (ook los uit te voeren: docker compose run --rm backup)
+COPY scripts/backup.mjs scripts/restore.mjs ./scripts/
 
 ENV NODE_ENV=production
 EXPOSE 3010

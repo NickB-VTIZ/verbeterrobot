@@ -9,7 +9,20 @@ import multer from "multer";
 import { parseDocument } from "./parser.js";
 import { getAnswersFromAI } from "./ai.js";
 import { injectAnswers } from "./injector.js";
-import { runDocxPipeline } from "./docx/pipeline.js";
+import { runDocxPipeline, extractDocxParagraphs } from "./docx/pipeline.js";
+import { runWithLlmContext } from "./storage/llmlog.js";
+import {
+  createDocument,
+  saveParagraphs,
+  addVersion,
+  listVersions,
+  setStatus,
+  audit,
+  purgeExpired,
+} from "./storage/repo.js";
+import { generateOriginalPreview, generateVersionPreview, retryMissingPreviews } from "./storage/previews.js";
+import { buildGenerationContext } from "./context.js";
+import { registerLibraryRoutes } from "./routes/library.js";
 import { toolsAvailable } from "./docx/visual.js";
 import {
   listSubjectsPublic,
@@ -44,6 +57,7 @@ import {
   destroySession,
   requireRole,
   sessionRole,
+  sessionUser,
   tokenFromReq,
   loginAllowed,
   registerFailure,
@@ -119,8 +133,12 @@ app.post("/api/login", (req, res) => {
   }
 
   const { role, password } = req.body || {};
+  const name = String(req.body?.name || "").trim().replace(/\s+/g, " ").slice(0, 60);
   if (role !== "teacher" && role !== "admin") {
     return res.status(400).json({ error: "Ongeldige rol." });
+  }
+  if (role === "teacher" && name.length < 2) {
+    return res.status(400).json({ error: "Geef je naam op (minstens 2 tekens)." });
   }
   if (typeof password !== "string" || !password) {
     return res.status(400).json({ error: "Wachtwoord ontbreekt." });
@@ -146,7 +164,8 @@ app.post("/api/login", (req, res) => {
   }
 
   registerSuccess(ip);
-  return res.json({ ok: true, role, token: createSession(role) });
+  const finalName = name || (role === "admin" ? "Beheerder" : "Leerkracht");
+  return res.json({ ok: true, role, name: finalName, token: createSession(role, finalName) });
 });
 
 app.post("/api/logout", (req, res) => {
@@ -157,7 +176,7 @@ app.post("/api/logout", (req, res) => {
 app.get("/api/session", (req, res) => {
   const role = sessionRole(req);
   if (!role) return res.status(401).json({ error: "Niet aangemeld." });
-  res.json({ role });
+  res.json({ role, name: sessionUser(req) });
 });
 
 // ── Beheer ────────────────────────────────────────────────────────────
@@ -344,60 +363,127 @@ app.post(
     const ext = path.extname(file.originalname).toLowerCase();
     const filePath = file.path;
     let outputPath = null;
+    let docId = null;
+    const fail = (status, message) => {
+      if (docId) {
+        try {
+          setStatus(docId, "mislukt");
+          audit(docId, req.user, req.role, "generatie_mislukt", { fout: String(message).slice(0, 300) });
+        } catch {
+          /* negeren */
+        }
+      }
+      cleanup(filePath, outputPath);
+      return res.status(status).json({ error: message, documentId: docId });
+    };
 
     try {
       // 1. Tekst extraheren
       const text = await parseDocument(filePath, ext);
       if (!text || text.trim().length < 10) {
-        cleanup(filePath);
-        return res
-          .status(422)
-          .json({ error: "Kon geen leesbare tekst uit het document halen." });
+        return fail(422, "Kon geen leesbare tekst uit het document halen.");
       }
 
+      // 1b. Permanent opslaan: origineel ongewijzigd + metadata (P4)
+      const body = req.body || {};
+      const created = createDocument({
+        srcPath: filePath,
+        originalName: file.originalname,
+        user: req.user,
+        vak: subject?.naam || body.vak || "",
+        vakId: subject?.id || "",
+        leerjaar: body.leerjaar,
+        richting: body.richting,
+        schooljaar: body.schooljaar,
+        tags: body.tags,
+        title: body.title,
+        fullText: text,
+        genOptions: { context: extraContext, topics, subjectId: subject?.id || null },
+      });
+      docId = created.doc.id;
+      audit(docId, req.user, req.role, "upload", {
+        bestand: file.originalname,
+        grootte: file.size,
+        duplicaatVan: created.duplicates.map((d) => d.id),
+      });
+      const llmCtx = { documentId: docId, callType: "generatie", vak: subject?.naam || "", teacher: req.user };
+
       // 2. AI: antwoorden genereren
-      const recalled = await recallLessons(
-        `${subject?.naam || ""} ${topics.join(" ")} ${text.slice(0, 300)}`
-      );
-      const training = buildTrainingContext(subject?.id || null, recalled);
-      const subjectContext = [buildSubjectContext(subject, text, topics), training]
-        .filter(Boolean)
-        .join("\n\n");
+      const subjectContext = await buildGenerationContext({ subject, topics, text });
+      let slotsForVersion = [];
+      let questionsForVersion = [];
+      let qcIssues = [];
       // 2a. .docx: gestructureerde pipeline (paragraaf-ID's, slots, controle van berekeningen)
       let review = null;
       let clarifications = [];
       let visualStatus = "";
-      if (ext === ".docx" && process.env.DOCX_PIPELINE !== "off") {
+      // Voor .docx is er bewust GEEN terugval op de klassieke tekst-matching/achteraan-methode:
+      // een antwoord dat niet op een geldige plaats kan, wordt "handmatig nakijken" en nooit achteraan gezet.
+      const docxPipelineOn = ext === ".docx" && process.env.DOCX_PIPELINE !== "off";
+      if (docxPipelineOn) {
+        let result = null;
         try {
-          const result = await runDocxPipeline(filePath, { extraContext, subjectContext });
-          if (result) {
-            outputPath = result.outputPath;
-            review = result.review;
-            clarifications = result.clarifications || [];
-            visualStatus = result.visual?.status || "";
-            for (const w of result.warnings) console.warn("docx-pipeline:", w);
-            console.log(
-              `docx-pipeline: ${result.questions} vraag/vragen, ${review.length} om na te kijken.`
-            );
-          }
+          const paras = await extractDocxParagraphs(filePath);
+          saveParagraphs(docId, paras);
+          result = await runWithLlmContext(llmCtx, () =>
+            runDocxPipeline(filePath, { extraContext, subjectContext })
+          );
         } catch (err) {
-          console.error("docx-pipeline mislukt, terugval op klassieke methode:", err.message);
+          console.error("docx-pipeline mislukt:", err.message);
+          return fail(502, `Het Word-document kon niet betrouwbaar verwerkt worden: ${err.message}`);
         }
+        if (!result) {
+          return fail(
+            422,
+            "Er werden geen vragen of antwoordplaatsen herkend in dit Word-document. " +
+              "Er is niets achteraan toegevoegd. Controleer het document of duid de vragen zelf aan."
+          );
+        }
+        outputPath = result.outputPath;
+        slotsForVersion = result.slots;
+        questionsForVersion = result.questionList;
+        qcIssues = [...result.warnings, ...result.review.map((r) => `${r.qid}: ${r.reden}`)];
+        review = result.review;
+        clarifications = result.clarifications || [];
+        visualStatus = result.visual?.status || "";
+        for (const w of result.warnings) console.warn("docx-pipeline:", w);
+        console.log(
+          `docx-pipeline: ${result.questions} vraag/vragen, ${review.length} om na te kijken.`
+        );
       }
 
-      // 2b. Klassieke methode (andere formaten, of terugval)
+      // 2b. Klassieke methode (andere formaten dan .docx, of DOCX_PIPELINE=off)
       if (!outputPath) {
         const answers = await getAnswersFromAI(text, extraContext, subjectContext);
         if (!answers || answers.length === 0) {
-          cleanup(filePath);
-          return res
-            .status(422)
-            .json({ error: "AI kon geen vragen vinden in het document." });
+          return fail(422, "AI kon geen vragen vinden in het document.");
         }
 
         // 3. Antwoorden injecteren in origineel document
         outputPath = await injectAnswers(filePath, ext, answers);
+        slotsForVersion = answers.map((a, i) => ({ qid: `k${i + 1}`, para_id: "", type: "klassiek", content: a.antwoord ?? a.answer ?? "" }));
       }
+
+      // 3b. Versie permanent bewaren (nooit overschrijven)
+      const versionNumber = addVersion({
+        docId,
+        outputPath,
+        ext: path.extname(outputPath).toLowerCase() || ext,
+        createdBy: req.user,
+        summary: { aantalVragen: questionsForVersion.length, nakijken: review ? review.length : 0, visueel: visualStatus || null },
+        qcIssues,
+        slots: slotsForVersion,
+        questions: questionsForVersion,
+      });
+      audit(docId, req.user, req.role, "gegenereerd", { versie: versionNumber });
+      generateOriginalPreview(docId);
+      generateVersionPreview(docId, versionNumber);
+      res.setHeader("X-Document-Id", docId);
+      res.setHeader("X-Version", String(versionNumber));
+      res.setHeader(
+        "Access-Control-Expose-Headers",
+        "X-Document-Id, X-Version, X-Nakijken, X-Nakijken-Aantal, X-Verduidelijking, X-Visuele-Controle"
+      );
 
       if (review) {
         res.setHeader("X-Nakijken-Aantal", String(review.length));
@@ -414,10 +500,6 @@ app.post(
           );
         }
         if (visualStatus) res.setHeader("X-Visuele-Controle", visualStatus);
-        res.setHeader(
-          "Access-Control-Expose-Headers",
-          "X-Nakijken, X-Nakijken-Aantal, X-Verduidelijking, X-Visuele-Controle"
-        );
       }
 
       // 4. Terugsturen
@@ -438,11 +520,8 @@ app.post(
         console.error("Stream fout:", err);
       });
     } catch (err) {
-      cleanup(filePath, outputPath);
       console.error("Verwerkingsfout:", err);
-      return res
-        .status(500)
-        .json({ error: err.message || "Onbekende serverfout." });
+      return fail(500, err.message || "Onbekende serverfout.");
     }
   }
 );
@@ -457,6 +536,9 @@ function cleanup(...paths) {
   }
 }
 
+// ── Bibliotheek, markeren, versies, prullenbak, beheeroverzicht ───────
+registerLibraryRoutes(app, { makeUpload });
+
 // ── SPA fallback ──────────────────────────────────────────────────────
 if (fs.existsSync(DIST)) {
   app.get("*", (_req, res) => {
@@ -464,8 +546,26 @@ if (fs.existsSync(DIST)) {
   });
 }
 
+function runMaintenance() {
+  try {
+    const purged = purgeExpired();
+    if (purged && (purged.length || purged.purged)) {
+      console.log("🗑️  Verlopen documenten uit de prullenbak verwijderd.");
+    }
+  } catch (e) {
+    console.warn("Prullenbak opruimen mislukt:", e.message);
+  }
+  try {
+    retryMissingPreviews();
+  } catch (e) {
+    console.warn("Previews opnieuw proberen mislukt:", e.message);
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`✅ Verbeterrobot draait op http://localhost:${PORT}`);
+  runMaintenance();
+  setInterval(runMaintenance, 60 * 60 * 1000).unref();
   if (!getSettings().omnirouteApiKey) {
     console.warn("⚠️  Geen Omniroute API-sleutel ingesteld (.env of beheer).");
   }

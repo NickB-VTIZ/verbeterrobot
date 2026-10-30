@@ -1,9 +1,13 @@
-import { useState, useRef, useCallback, useEffect, DragEvent, ChangeEvent } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, DragEvent, ChangeEvent } from "react";
 import Admin from "./Admin";
+import Library from "./Library";
+import DocumentDetail from "./DocumentDetail";
+import Marking from "./Marking";
+import { createApi } from "./api";
 import { RobotMascot, ThoughtBubble, WorkflowSteps, PromptBlocks, Mood } from "./RobotMascot";
 
 // ── Types ─────────────────────────────────────────────────────────────
-type Step = "login" | "upload" | "processing" | "done" | "error" | "admin";
+type Step = "login" | "upload" | "processing" | "done" | "error" | "admin" | "library" | "document" | "mark";
 type Role = "teacher" | "admin";
 
 interface ProcessingStage {
@@ -91,6 +95,27 @@ export default function App() {
   const [step, setStep] = useState<Step>("login");
   const [role, setRole] = useState<Role>("teacher");
   const [token, setToken] = useState("");
+  const [userName, setUserName] = useState("");
+  const [docId, setDocId] = useState("");
+  const [dark, setDark] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("theme");
+      if (saved) return saved === "dark";
+    } catch {
+      /* geen localStorage */
+    }
+    return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  });
+  const api = useMemo(() => createApi(token, sessionExpired), [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    try {
+      localStorage.setItem("theme", dark ? "dark" : "light");
+    } catch {
+      /* negeren */
+    }
+  }, [dark]);
   const [maxMb, setMaxMb] = useState(20);
   const [version, setVersion] = useState("");
   const [password, setPassword] = useState("");
@@ -152,13 +177,14 @@ export default function App() {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, password }),
+        body: JSON.stringify({ role, name: userName.trim(), password }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setToken(data.token);
         setPassword("");
-        setStep(data.role === "admin" ? "admin" : "upload");
+        setUserName(data.name || userName.trim());
+        setStep(data.role === "admin" ? "admin" : "library");
       } else {
         setAuthError(data.error || "Ongeldig wachtwoord.");
       }
@@ -175,8 +201,14 @@ export default function App() {
     }
     setToken("");
     setPassword("");
+    setDocId("");
     handleReset();
     setStep("login");
+  }
+
+  function openDocument(id: string, view: "detail" | "mark" = "detail") {
+    setDocId(id);
+    setStep(view === "mark" ? "mark" : "document");
   }
 
   function sessionExpired() {
@@ -343,7 +375,7 @@ export default function App() {
     setClarifications([]);
     setVisualStatus("");
     setClarifyAnswer("");
-    setStep(role === "admin" && token ? "admin" : "upload");
+    setStep(!token ? "login" : role === "admin" ? "admin" : "library");
   }
 
   // ── Robot: stemming, denkballon en workflow ─────────────────────────
@@ -405,8 +437,86 @@ export default function App() {
       : 0;
 
   // ── Render ─────────────────────────────────────────────────────────
+  const wide = step === "library" || step === "document" || step === "mark";
+
+  const themeToggle = (
+    <button
+      type="button"
+      onClick={() => setDark(d => !d)}
+      className="fixed top-3 right-3 z-40 w-11 h-11 rounded-full bg-white/90 border border-gray-200 shadow text-lg flex items-center justify-center hover:bg-gray-50"
+      aria-label={dark ? "Lichte weergave" : "Donkere weergave"}
+      title={dark ? "Lichte weergave" : "Donkere weergave"}
+    >
+      {dark ? "☀️" : "🌙"}
+    </button>
+  );
+
+  if (wide) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-red-50">
+        {themeToggle}
+        <header className="max-w-6xl mx-auto px-4 pt-4 pb-2 flex flex-wrap items-center gap-3 pr-16">
+          <button
+            type="button"
+            className="flex items-center gap-2 text-xl font-bold text-gray-900"
+            onClick={() => setStep("library")}
+          >
+            <RobotMascot mood="idle" className="w-8 h-9" />
+            Verbeterrobot
+            {version && (
+              <span className="text-xs font-semibold text-red-700 bg-red-50 rounded-full px-2 py-0.5">v{version}</span>
+            )}
+          </button>
+          <span className="ml-auto text-sm text-gray-500">{userName}</span>
+          {role === "admin" && (
+            <button type="button" onClick={() => setStep("admin")} className="btn-sm">
+              Beheer
+            </button>
+          )}
+          <button type="button" onClick={handleLogout} className="btn-sm">
+            Afmelden
+          </button>
+        </header>
+        <main className="max-w-6xl mx-auto px-4 pb-10 pt-2">
+          {step === "library" && (
+            <Library
+              api={api}
+              role={role}
+              userName={userName}
+              maxMb={maxMb}
+              onOpen={(id, view) => openDocument(id, view === "mark" ? "mark" : "detail")}
+              onQuickTool={() => setStep("upload")}
+            />
+          )}
+          {step === "document" && docId && (
+            <DocumentDetail
+              key={docId}
+              api={api}
+              role={role}
+              userName={userName}
+              id={docId}
+              onBack={() => setStep("library")}
+              onMark={id => openDocument(id, "mark")}
+              onOpen={id => openDocument(id, "detail")}
+            />
+          )}
+          {step === "mark" && docId && (
+            <Marking
+              key={docId}
+              api={api}
+              id={docId}
+              onBack={() => setStep("document")}
+              onDone={id => openDocument(id, "detail")}
+            />
+          )}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-gray-50 to-red-50">
+      {themeToggle}
       {/* Header: robot met denkballon */}
       <div className={`mb-6 w-full ${step === "admin" ? "max-w-2xl" : "max-w-lg"}`}>
         <h1 className="text-3xl font-bold text-gray-900 text-center">
@@ -448,6 +558,22 @@ export default function App() {
                 </button>
               ))}
             </div>
+            {role === "teacher" && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Jouw naam</label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={e => setUserName(e.target.value)}
+                  placeholder="Voornaam Naam (je documenten staan onder deze naam)"
+                  autoComplete="name"
+                  autoFocus
+                  required
+                  minLength={2}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Wachtwoord
@@ -457,7 +583,7 @@ export default function App() {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 placeholder={role === "admin" ? "Voer het beheerderswachtwoord in" : "Voer het leerkrachtenwachtwoord in"}
-                autoFocus
+                autoFocus={role === "admin"}
                 required
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
               />
@@ -465,7 +591,11 @@ export default function App() {
             {authError && (
               <p className="text-sm text-red-600 bg-red-50 rounded-lg px-4 py-2">{authError}</p>
             )}
-            <button type="submit" disabled={authLoading || !password} className="btn-primary w-full justify-center">
+            <button
+              type="submit"
+              disabled={authLoading || !password || (role === "teacher" && userName.trim().length < 2)}
+              className="btn-primary w-full justify-center"
+            >
               {authLoading ? <SpinnerIcon className="w-4 h-4" /> : null}
               {authLoading ? "Aanmelden…" : "Aanmelden"}
             </button>
@@ -478,7 +608,7 @@ export default function App() {
             token={token}
             version={version}
             onUnauthorized={sessionExpired}
-            onUseTool={() => setStep("upload")}
+            onUseTool={() => setStep("library")}
             onLogout={handleLogout}
           />
         )}
@@ -487,6 +617,9 @@ export default function App() {
         {step === "upload" && (
           <div className="space-y-5">
             <div className="flex justify-end gap-2 -mt-2">
+              <button type="button" onClick={() => setStep("library")} className="text-xs text-red-600 hover:underline mr-auto">
+                ← Bibliotheek
+              </button>
               {role === "admin" && (
                 <button type="button" onClick={() => setStep("admin")} className="text-xs text-red-600 hover:underline">
                   ← Naar beheer

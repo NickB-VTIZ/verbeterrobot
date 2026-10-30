@@ -119,6 +119,8 @@ export function paragraphText(pNode) {
     if (!n) return;
     if (n.nodeType === 1) {
       const name = n.localName || n.nodeName.replace(/^.*:/, "");
+      // Tekstvakken bevatten hun eigen paragrafen (apart geëxtraheerd): niet meetellen
+      if (name === "txbxContent" || name === "Fallback") return;
       if (name === "t") {
         parts.push(n.textContent || "");
       } else if (name === "tab") {
@@ -168,6 +170,23 @@ function extractPStyle(pNode) {
   return { style, headingLevel, isList };
 }
 
+/** Is alle tekst van de paragraaf vet? (voor de weergave in het aanduidingsscherm) */
+function isParagraphBold(pNode) {
+  let withText = 0;
+  let bold = 0;
+  for (const r of Array.from(pNode.getElementsByTagNameNS(W_NS, "r"))) {
+    const txt = Array.from(r.getElementsByTagNameNS(W_NS, "t"))
+      .map((t) => t.textContent || "")
+      .join("");
+    if (!txt.trim()) continue;
+    withText++;
+    const rPr = getDirectChild(r, "rPr");
+    const b = rPr ? getDirectChild(rPr, "b") : null;
+    if (b && !["0", "false"].includes(b.getAttribute("w:val") || "")) bold++;
+  }
+  return withText > 0 && bold === withText;
+}
+
 /**
  * Doorloopt het document en verzamelt alle <w:p> in volgorde.
  * Kent stabiele ID's toe ("p_001", "p_002", ...) en stempelt _vr_id op de DOM-node.
@@ -208,8 +227,13 @@ export function extractParagraphs(xmlString) {
       const isPageBreak = isPageBreakOnly(node);
       const { style, headingLevel, isList } = extractPStyle(node);
 
+      // Een paragraaf die een tekstvak of tekening draagt is nooit "leeg"
+      const hasObject =
+        node.getElementsByTagNameNS(W_NS, "txbxContent").length > 0 ||
+        node.getElementsByTagNameNS(W_NS, "drawing").length > 0 ||
+        node.getElementsByTagNameNS(W_NS, "pict").length > 0;
       // Lege paragrafen tellen enkel als mogelijke invulruimte als ze geen pure paginascheiding zijn
-      const isEmpty = trimmed.length === 0 && !isPageBreak;
+      const isEmpty = trimmed.length === 0 && !isPageBreak && !hasObject;
 
       paragraphs.push({
         id,
@@ -217,6 +241,7 @@ export function extractParagraphs(xmlString) {
         style,
         headingLevel,
         isList,
+        bold: isParagraphBold(node),
         isEmpty,
         isPageBreak,
         inTable: !!nextContext.inTable,
@@ -227,11 +252,29 @@ export function extractParagraphs(xmlString) {
         // Referentie naar de DOM-knoop (voor in-memory inspectie)
         _node: node,
       });
-      return; // <w:p> bevat geen geneste <w:p>'s
+      // Een <w:p> kan wel tekstvakken (w:txbxContent) met eigen paragrafen bevatten:
+      // die komen in documentvolgorde ná de omhullende paragraaf en krijgen een eigen ID.
+      const nested = [];
+      (function findBoxes(n) {
+        for (let c = n.firstChild; c; c = c.nextSibling) {
+          if (c.nodeType !== 1) continue;
+          const cname = c.localName || c.nodeName.replace(/^.*:/, "");
+          if (cname === "Fallback") continue;
+          if (cname === "txbxContent") nested.push(c);
+          else findBoxes(c);
+        }
+      })(node);
+      for (const box of nested) traverse(box, nextContext);
+      return;
     }
 
     for (let c = node.firstChild; c; c = c.nextSibling) {
-      if (c.nodeType === 1) traverse(c, nextContext);
+      if (c.nodeType !== 1) continue;
+      // mc:AlternateContent bevat dezelfde tekstvak-inhoud twee keer (Choice + Fallback):
+      // enkel de Choice tellen, anders krijgt dezelfde tekst twee ID's.
+      const cname = c.localName || c.nodeName.replace(/^.*:/, "");
+      if (cname === "Fallback") continue;
+      traverse(c, nextContext);
     }
   }
 

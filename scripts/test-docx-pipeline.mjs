@@ -164,4 +164,90 @@ assert.deepEqual(skipped.issues, []);
 delete process.env.VISUAL_CHECK;
 console.log("✔ visuele controle (pure delen en overslaan)");
 
+// ── P1: antwoorden staan direct bij de vraag, nooit achteraan ─────────
+{
+  const { DOMParser } = await import("@xmldom/xmldom");
+  const q = (n, t) => `<w:p><w:r>${rpr}<w:t>${n}. ${t}</w:t></w:r></w:p>`;
+  const filler = (t) => `<w:p><w:r>${rpr}<w:t>${t}</w:t></w:r></w:p>`;
+  const sample =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="${W}"><w:body>` +
+    filler("Toets elektriciteit") +
+    q(1, "Bereken U bij 2 A en 5 ohm.") +
+    filler("Gegeven: I = 2 A") +
+    q(2, "Bereken P bij 230 V en 5 A.") +
+    // tabel met een vraag in een cel
+    `<w:tbl><w:tr><w:tc><w:p><w:r>${rpr}<w:t>3. Bereken R bij 10 V en 2 A.</w:t></w:r></w:p></w:tc><w:tc><w:p/></w:tc></w:tr></w:tbl>` +
+    // tekstvak (met Choice + Fallback: mag maar één keer geteld worden)
+    `<w:p><w:r><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice><w:txbxContent><w:p><w:r>${rpr}<w:t>4. Wat is de eenheid van lading?</w:t></w:r></w:p></w:txbxContent></mc:Choice><mc:Fallback><w:txbxContent><w:p><w:r>${rpr}<w:t>4. Wat is de eenheid van lading?</w:t></w:r></w:p></w:txbxContent></mc:Fallback></mc:AlternateContent></w:r></w:p>` +
+    q(5, "Wat is het rendement?") +
+    // laatste paragraaf in het document: antwoord moet vóór sectPr blijven
+    q(6, "Laatste vraag.") +
+    `<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>` +
+    `</w:body></w:document>`;
+
+  const idOf = (text) => extractParagraphs(sample).paragraphs.find((p) => p.text.includes(text)).id;
+  const insertSlots = [
+    { para_id: idOf("1. Bereken U"), type: "insert_after", content: "U = 10 V" },
+    { para_id: idOf("2. Bereken P"), type: "insert_after", content: "P = 1 150 W" },
+    { para_id: idOf("3. Bereken R"), type: "insert_after", content: "R = 5 ohm" },
+    { para_id: idOf("4. Wat is de eenheid"), type: "insert_after", content: "coulomb" },
+    { para_id: idOf("5. Wat is het"), type: "insert_after", content: "η = 80 %" },
+    { para_id: idOf("6. Laatste"), type: "insert_after", content: "klaar" },
+  ];
+  // Opzettelijk door elkaar aangeleverd: volgorde van de slots mag niets uitmaken
+  const shuffled = [insertSlots[3], insertSlots[0], insertSlots[5], insertSlots[2], insertSlots[1], insertSlots[4]];
+  const r = applySolutionsToXml(sample, () => shuffled);
+  assert.deepEqual(r.qc, [], r.qc.join("; "));
+  assert.deepEqual(r.unplaced, []);
+  assert.equal(r.insertedParagraphs, insertSlots.length);
+  assert.equal(r.paragraphsAfter - r.paragraphsBefore, insertSlots.length, "aantal paragrafen +1 per insert_after");
+
+  const outDoc = new DOMParser().parseFromString(r.xml, "application/xml");
+  // eigen tekst van een paragraaf (zonder paragrafen in een tekstvak erbinnen)
+  const ownP = (t) => {
+    for (let n = t.parentNode; n; n = n.parentNode) if (n.localName === "p") return n;
+    return null;
+  };
+  const textOf = (p) =>
+    Array.from(p.getElementsByTagNameNS(W, "t"))
+      .filter((t) => ownP(t) === p)
+      .map((t) => t.textContent)
+      .join("");
+  const all = Array.from(outDoc.getElementsByTagNameNS(W, "p"));
+  const texts = all.map(textOf);
+  const pairs = [
+    ["1. Bereken U", "U = 10 V"],
+    ["2. Bereken P", "P = 1 150 W"],
+    ["3. Bereken R", "R = 5 ohm"],
+    ["4. Wat is de eenheid", "coulomb"],
+    ["5. Wat is het", "η = 80 %"],
+    ["6. Laatste", "klaar"],
+  ];
+  for (const [vraag, antwoord] of pairs) {
+    const qi = texts.findIndex((t) => t.includes(vraag));
+    assert.ok(qi >= 0, `vraag '${vraag}' bestaat`);
+    assert.ok(texts[qi + 1]?.includes(antwoord), `antwoord '${antwoord}' staat direct na '${vraag}'`);
+    // en het is dezelfde ouder: direct volgende broer-paragraaf
+    assert.equal(all[qi + 1].previousSibling, all[qi], `'${antwoord}' is de directe volgende broer van de vraag`);
+  }
+  // Geen enkel antwoord in de laatste paragraaf van de body, na sectPr of op documentniveau
+  const body = outDoc.getElementsByTagNameNS(W, "body")[0];
+  const lastEl = Array.from(body.childNodes).filter((n) => n.nodeType === 1).pop();
+  assert.equal(lastEl.localName, "sectPr", "sectPr blijft het laatste element van body");
+  assert.equal((r.xml.match(/Antwoord: /g) || []).length, insertSlots.length, "elk antwoord precies één keer");
+  console.log("✔ P1: antwoorden direct bij de vraag, ook in tabel, tekstvak en laatste paragraaf");
+
+  // Ongeldig para_id → NOOIT achteraan, maar gemeld als 'handmatig nakijken'
+  const bad = applySolutionsToXml(sample, () => [
+    { para_id: "p_999", type: "insert_after", content: "ZWERFANTWOORD" },
+    { para_id: idOf("1. Bereken U"), type: "insert_after", content: "U = 10 V" },
+  ]);
+  assert.equal(bad.unplaced.length, 1);
+  assert.equal(bad.unplaced[0].para_id, "p_999");
+  assert.ok(!bad.xml.includes("ZWERFANTWOORD"), "onplaatsbaar antwoord komt nergens in het document");
+  assert.equal(bad.paragraphsAfter - bad.paragraphsBefore, 1);
+  assert.deepEqual(bad.qc, []);
+  console.log("✔ P1: slot zonder geldige plaats wordt gemeld en niet achteraan gezet");
+}
+
 console.log("\nAlle tests geslaagd.");
