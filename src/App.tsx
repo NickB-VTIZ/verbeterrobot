@@ -119,6 +119,14 @@ export default function App() {
   const [maxMb, setMaxMb] = useState(20);
   const [version, setVersion] = useState("");
   const [password, setPassword] = useState("");
+  const [personal, setPersonal] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("loginMode") === "personal";
+    } catch {
+      return false;
+    }
+  });
+  const [loginUser, setLoginUser] = useState("");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -177,7 +185,9 @@ export default function App() {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, name: userName.trim(), password }),
+        body: JSON.stringify(
+          personal ? { username: loginUser.trim(), password } : { role, name: userName.trim(), password }
+        ),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -543,7 +553,8 @@ export default function App() {
 
         {/* ── Stap 1: Aanmelden ── */}
         {step === "login" && (
-          <form onSubmit={handleLogin} className="space-y-5">
+          <form onSubmit={handleLogin} noValidate className="space-y-5">
+            {!personal && (<>
             <div className="grid grid-cols-2 gap-1 bg-gray-100 rounded-lg p-1">
               {(["teacher", "admin"] as Role[]).map(r => (
                 <button
@@ -588,16 +599,62 @@ export default function App() {
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
               />
             </div>
+            </>)}
+            {personal && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Gebruikersnaam</label>
+                  <input
+                    type="text"
+                    value={loginUser}
+                    onChange={e => setLoginUser(e.target.value)}
+                    autoComplete="username"
+                    autoFocus
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Wachtwoord</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  />
+                </div>
+              </>
+            )}
             {authError && (
               <p className="text-sm text-red-600 bg-red-50 rounded-lg px-4 py-2">{authError}</p>
             )}
             <button
               type="submit"
-              disabled={authLoading || !password || (role === "teacher" && userName.trim().length < 2)}
+              disabled={
+                authLoading ||
+                !password ||
+                (personal ? !loginUser.trim() : role === "teacher" && userName.trim().length < 2)
+              }
               className="btn-primary w-full justify-center"
             >
               {authLoading ? <SpinnerIcon className="w-4 h-4" /> : null}
               {authLoading ? "Aanmelden…" : "Aanmelden"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const next = !personal;
+                setPersonal(next);
+                setAuthError("");
+                try {
+                  localStorage.setItem("loginMode", next ? "personal" : "shared");
+                } catch {
+                  /* negeren */
+                }
+              }}
+              className="block mx-auto text-xs text-gray-500 underline cursor-pointer"
+            >
+              {personal ? "Aanmelden met het gedeelde wachtwoord" : "Aanmelden met een persoonlijk account"}
             </button>
           </form>
         )}

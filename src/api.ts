@@ -135,6 +135,8 @@ export interface DocItem {
   status: string;
   activeVersion: number | null;
   previewStatus: string;
+  proposalStatus?: "geen" | "bezig" | "klaar" | "mislukt";
+  proposalError?: string | null;
   note: string;
   genOptions: any;
   createdAt: string;

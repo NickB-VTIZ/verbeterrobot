@@ -217,7 +217,54 @@ function initSchema(db) {
       full_text,
       tokenize = 'unicode61 remove_diacritics 2'
     );
+
+    -- Persoonlijke accounts (aangemaakt door de beheerder).
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('teacher','admin')),
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_login TEXT
+    );
+
+    -- Wat de app leert uit een door de leerkracht zelf verbeterde versie:
+    -- per vraag het AI-antwoord naast het antwoord van de leerkracht.
+    -- document_id wordt NULL als het document definitief verwijderd werd (voorbeeld blijft).
+    CREATE TABLE IF NOT EXISTS training_samples (
+      id TEXT PRIMARY KEY,
+      document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+      qid TEXT,
+      vak TEXT,
+      vak_id TEXT,
+      teacher TEXT,
+      question_text TEXT,
+      ai_answer TEXT,
+      teacher_answer TEXT,
+      verdict TEXT,
+      insight TEXT,
+      source TEXT NOT NULL DEFAULT 'verbeterde_versie',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_samples_doc ON training_samples(document_id);
+    CREATE INDEX IF NOT EXISTS idx_samples_vak ON training_samples(vak_id);
   `);
+
+  // Migraties voor bestaande databanken
+  const cols = db.prepare("PRAGMA table_info(documents)").all().map((c) => c.name);
+  if (!cols.includes("proposal_status")) {
+    db.exec("ALTER TABLE documents ADD COLUMN proposal_status TEXT NOT NULL DEFAULT 'geen'");
+  }
+  if (!cols.includes("proposal_error")) {
+    db.exec("ALTER TABLE documents ADD COLUMN proposal_error TEXT");
+  }
+  // Achtergrondtaken leven enkel in het geheugen: na een herstart kan niets nog 'bezig' zijn.
+  db.exec(
+    "UPDATE documents SET proposal_status = 'mislukt', proposal_error = 'Onderbroken door een herstart van de server.' WHERE proposal_status = 'bezig'"
+  );
 }
 
 /** Sluit de database (nuttig bij graceful shutdown en in tests). */

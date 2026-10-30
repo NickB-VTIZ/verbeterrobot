@@ -83,7 +83,7 @@ export function hashPassword(pw) {
   return `${salt}:${hash}`;
 }
 
-function verifyHash(pw, stored) {
+export function verifyHash(pw, stored) {
   const [salt, hash] = String(stored).split(":");
   if (!salt || !hash) return false;
   const a = Buffer.from(hash, "hex");

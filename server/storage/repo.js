@@ -81,6 +81,8 @@ function rowToDoc(r, extra = {}) {
     status: r.status,
     activeVersion: r.active_version,
     previewStatus: r.preview_status,
+    proposalStatus: r.proposal_status || "geen",
+    proposalError: r.proposal_error || null,
     note: r.note,
     genOptions: parseJson(r.gen_options_json, null),
     createdAt: r.created_at,
@@ -228,6 +230,16 @@ export function updateDocument(id, patch = {}) {
 export function setStatus(id, status) {
   if (!STATUSES.includes(status)) return;
   getDb().prepare(`UPDATE documents SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, id);
+}
+
+export const PROPOSAL_STATUSES = ["geen", "bezig", "klaar", "mislukt"];
+
+/** Status van het automatische AI-voorstel (aanduiding van vragen en antwoordplaatsen). */
+export function setProposalStatus(id, status, error = null) {
+  if (!PROPOSAL_STATUSES.includes(status)) return;
+  getDb()
+    .prepare(`UPDATE documents SET proposal_status = ?, proposal_error = ? WHERE id = ?`)
+    .run(status, error ? String(error).slice(0, 500) : null, id);
 }
 
 /* ───────────── lijst, zoeken, filters ───────────── */
@@ -651,6 +663,80 @@ export function deleteFeedback(id) {
   return getDb().prepare(`DELETE FROM feedback WHERE id = ?`).run(id).changes > 0;
 }
 
+/* ───────────── trainingsvoorbeelden uit verbeterde versies ───────────── */
+
+function rowToSample(r) {
+  return {
+    id: r.id,
+    documentId: r.document_id,
+    qid: r.qid,
+    vak: r.vak,
+    vakId: r.vak_id,
+    teacher: r.teacher,
+    questionText: r.question_text,
+    aiAnswer: r.ai_answer,
+    teacherAnswer: r.teacher_answer,
+    verdict: r.verdict,
+    insight: r.insight,
+    source: r.source,
+    createdAt: r.created_at,
+  };
+}
+
+/** Bewaart wat de app leerde uit een verbeterde versie van de leerkracht. */
+export function addTrainingSample({ docId = null, qid, questionText, aiAnswer, teacherAnswer, verdict, insight, source = "verbeterde_versie" }) {
+  const db = getDb();
+  const d = docId ? db.prepare(`SELECT vak, vak_id, teacher FROM documents WHERE id = ?`).get(docId) : null;
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO training_samples (id, document_id, qid, vak, vak_id, teacher, question_text, ai_answer, teacher_answer, verdict, insight, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    d ? docId : null,
+    qid != null ? String(qid).slice(0, 40) : null,
+    d?.vak || null,
+    d?.vak_id || null,
+    d?.teacher || null,
+    questionText ? String(questionText).slice(0, 4000) : null,
+    aiAnswer != null ? String(aiAnswer).slice(0, 4000) : null,
+    teacherAnswer != null ? String(teacherAnswer).slice(0, 4000) : null,
+    verdict ? String(verdict).slice(0, 40) : null,
+    insight ? String(insight).slice(0, 1500) : null,
+    String(source).slice(0, 40)
+  );
+  return id;
+}
+
+export function listTrainingSamples({ limit = 300, vakId = null, docId = null } = {}) {
+  const lim = Math.min(Math.max(Number(limit) || 300, 1), 2000);
+  const where = [];
+  const args = [];
+  if (vakId) {
+    where.push("vak_id = ?");
+    args.push(vakId);
+  }
+  if (docId) {
+    where.push("document_id = ?");
+    args.push(docId);
+  }
+  const sql = `SELECT * FROM training_samples ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY created_at DESC, rowid DESC LIMIT ?`;
+  return getDb().prepare(sql).all(...args, lim).map(rowToSample);
+}
+
+export function deleteTrainingSample(id) {
+  return getDb().prepare(`DELETE FROM training_samples WHERE id = ?`).run(id).changes > 0;
+}
+
+/** Verwijdert eerdere voorbeelden van een document uit dezelfde bron (bij opnieuw uploaden). */
+export function clearTrainingSamples(docId, source = "verbeterde_versie") {
+  return getDb().prepare(`DELETE FROM training_samples WHERE document_id = ? AND source = ?`).run(docId, source).changes;
+}
+
+export function trainingSampleCount() {
+  return getDb().prepare(`SELECT COUNT(*) AS n FROM training_samples`).get().n;
+}
+
 /* ───────────── LLM-aanroepen ───────────── */
 
 export function listLlmCalls(docId, { withText = false } = {}) {
@@ -756,6 +842,7 @@ export function purgeDocument(docId, { keepExamples = true, user = "systeem", ro
   const fileIds = documentFileIds(docId);
   const preview = purgePreview(docId);
   db.transaction(() => {
+    if (!keepExamples) db.prepare(`DELETE FROM training_samples WHERE document_id = ?`).run(docId);
     if (keepExamples) {
       db.prepare(`DELETE FROM feedback WHERE document_id = ? AND action <> 'goedgekeurd' AND (corrected_answer IS NULL OR corrected_answer = '')`).run(docId);
       db.prepare(`UPDATE feedback SET document_id = NULL WHERE document_id = ?`).run(docId);

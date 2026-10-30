@@ -5,18 +5,39 @@
 import { randomBytes } from "crypto";
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 uur
-const sessions = new Map(); // token -> { role, name, expires }
+const sessions = new Map(); // token -> { role, name, userId, expires }
 
-/** Naam van de gebruiker (leerkracht/beheerder) wordt bewaard voor eigenaarschap en audit. */
-export function createSession(role, name = "") {
+/**
+ * Naam van de gebruiker (leerkracht/beheerder) wordt bewaard voor eigenaarschap en audit.
+ * `userId` is gezet bij persoonlijke accounts, zodat sessies bij uitschakelen/verwijderen vervallen.
+ */
+export function createSession(role, name = "", userId = null) {
   const token = randomBytes(32).toString("hex");
   const clean = String(name || "").trim().replace(/\s+/g, " ").slice(0, 60);
-  sessions.set(token, { role, name: clean || (role === "admin" ? "Beheerder" : "Leerkracht"), expires: Date.now() + SESSION_TTL_MS });
+  sessions.set(token, {
+    role,
+    name: clean || (role === "admin" ? "Beheerder" : "Leerkracht"),
+    userId,
+    expires: Date.now() + SESSION_TTL_MS,
+  });
   return token;
 }
 
 export function destroySession(token) {
   sessions.delete(token);
+}
+
+/** Beëindigt alle sessies van een persoonlijk account (na uitschakelen, verwijderen of nieuw wachtwoord). */
+export function destroySessionsOfUser(userId) {
+  if (!userId) return 0;
+  let n = 0;
+  for (const [token, s] of sessions) {
+    if (s.userId === userId) {
+      sessions.delete(token);
+      n++;
+    }
+  }
+  return n;
 }
 
 function getSession(token) {

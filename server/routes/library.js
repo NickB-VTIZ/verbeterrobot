@@ -14,6 +14,7 @@ import { getAnswersFromAI } from "../ai.js";
 import { injectAnswers } from "../injector.js";
 import { getSubject } from "../subjects.js";
 import { buildGenerationContext } from "../context.js";
+import { learnFromCorrected } from "../learn.js";
 import { getSettings } from "../settings.js";
 import {
   runDocxPipeline,
@@ -31,6 +32,7 @@ import {
   canAccess,
   updateDocument,
   setStatus,
+  setProposalStatus,
   listDocuments,
   filterOptions,
   saveParagraphs,
@@ -64,6 +66,7 @@ import {
   duplicateDocument,
   listAudit,
   audit,
+  listTrainingSamples,
 } from "../storage/repo.js";
 
 /* ───────────── hulpfuncties ───────────── */
@@ -209,6 +212,41 @@ async function readGenOptions(doc, text) {
   const topics = Array.isArray(opts.topics) ? opts.topics : [];
   const subjectContext = await buildGenerationContext({ subject, topics, text });
   return { extraContext: opts.context || "", subjectContext, subject };
+}
+
+/**
+ * Maakt op de achtergrond een eerste, grondig voorstel (vragen + antwoordplaatsen) voor een .docx.
+ * Gebruikt vakcontext, lessen en voorbeelden en doet een tweede kritische controle-pass.
+ * Gooit nooit: fouten komen in proposal_status terecht zodat de upload niet faalt.
+ */
+async function runAutoProposal(docId, user, role) {
+  if (running.has(docId)) return;
+  running.add(docId);
+  try {
+    const doc = getDocument(docId);
+    if (!doc || doc.deletedAt) return;
+    setProposalStatus(docId, "bezig");
+    const orig = originalOf(doc);
+    const text = getParagraphs(docId).map((p) => p.text).join("\n").slice(0, 6000);
+    const { extraContext, subjectContext } = await readGenOptions(doc, text);
+    const { questions } = await runWithLlmContext(
+      { documentId: docId, callType: "voorstel", vak: doc.vak || "", teacher: user },
+      () => proposeStructure(orig.abs, { extraContext, subjectContext, refine: true })
+    );
+    const marks = questionsToMarks(questions);
+    saveMarks(docId, "llm_proposal", marks);
+    setProposalStatus(docId, "klaar");
+    audit(docId, user, role, "voorstel_automatisch", { aantal: marks.length, vragen: questions.length });
+  } catch (err) {
+    console.warn("[library] automatisch voorstel mislukt:", err.message);
+    try {
+      setProposalStatus(docId, "mislukt", String(err.message || err).slice(0, 300));
+    } catch {
+      /* negeren */
+    }
+  } finally {
+    running.delete(docId);
+  }
 }
 
 function parseIds(v) {
@@ -383,12 +421,18 @@ export function registerLibraryRoutes(app, { makeUpload }) {
           genOptions: { context: b.context || "", topics, subjectId: subject?.id || null },
         });
         const id = created.doc.id;
+        let autoProposal = false;
         if (ext === ".docx") {
           try {
             saveParagraphs(id, await extractDocxParagraphs(file.path));
+            autoProposal = true;
           } catch (err) {
             console.warn("[library] paragrafen extraheren mislukt:", err.message);
           }
+        }
+        if (autoProposal) {
+          // Direct op "bezig" zetten zodat de interface meteen weet dat er een voorstel onderweg is.
+          setProposalStatus(id, "bezig");
         }
         audit(id, req.user, req.role, "upload", {
           bestand: file.originalname,
@@ -397,6 +441,12 @@ export function registerLibraryRoutes(app, { makeUpload }) {
         });
         generateOriginalPreview(id);
         res.json({ document: getDocument(id), duplicates: created.duplicates });
+        if (autoProposal) {
+          // Het bronbestand is al opgeslagen door createDocument; de achtergrondtaak leest het uit de bibliotheek.
+          setImmediate(() => {
+            runAutoProposal(id, req.user, req.role).catch((e) => console.warn("[library] voorstel:", e.message));
+          });
+        }
       } finally {
         cleanup(file.path);
       }
@@ -844,18 +894,70 @@ export function registerLibraryRoutes(app, { makeUpload }) {
       if (running.has(doc.id)) throw httpError(409, "Er loopt al een bewerking voor dit document.");
       running.add(doc.id);
       try {
+        setProposalStatus(doc.id, "bezig");
         const orig = originalOf(doc);
+        const text = getParagraphs(doc.id).map((p) => p.text).join("\n").slice(0, 6000);
+        const { extraContext, subjectContext } = await readGenOptions(doc, text);
         const { questions } = await runWithLlmContext(
           { documentId: doc.id, callType: "voorstel", vak: doc.vak || "", teacher: req.user },
-          () => proposeStructure(orig.abs, { extraContext: doc.genOptions?.context || "" })
+          () => proposeStructure(orig.abs, { extraContext, subjectContext, refine: true })
         );
         const marks = questionsToMarks(questions);
         saveMarks(doc.id, "llm_proposal", marks);
+        setProposalStatus(doc.id, "klaar");
         audit(doc.id, req.user, req.role, "voorstel_gemaakt", { aantal: marks.length });
         res.json({ proposal: marks });
+      } catch (err) {
+        setProposalStatus(doc.id, "mislukt", String(err.message || err).slice(0, 300));
+        throw err;
       } finally {
         running.delete(doc.id);
       }
+    })
+  );
+
+  /**
+   * De leerkracht uploadt een zelf verbeterde versie (.docx). De app vergelijkt die met het origineel,
+   * bewaart per vraag een trainingsvoorbeeld en leert er lessen uit.
+   */
+  app.post(
+    "/api/documents/:id/corrected",
+    teacherOrAdmin,
+    (req, res, next) => {
+      makeUpload().single("file")(req, res, (err) => {
+        if (err) return res.status(400).json({ error: err.message });
+        next();
+      });
+    },
+    wrap(async (req, res) => {
+      const file = req.file;
+      if (!file) throw httpError(400, "Geen bestand ontvangen.");
+      try {
+        const doc = loadDoc(req);
+        if (path.extname(file.originalname).toLowerCase() !== ".docx" || path.extname(doc.originalFilename).toLowerCase() !== ".docx") {
+          throw httpError(400, "Een verbeterde versie moet een Word-document (.docx) zijn, net als het origineel.");
+        }
+        if (running.has(doc.id)) throw httpError(409, "Er loopt al een bewerking voor dit document.");
+        running.add(doc.id);
+        try {
+          const result = await learnFromCorrected(doc, file.path, { name: req.user, role: req.role });
+          res.json({ result });
+        } finally {
+          running.delete(doc.id);
+        }
+      } finally {
+        cleanup(file.path);
+      }
+    })
+  );
+
+  /** Wat de app leerde uit de verbeterde versie van dit document. */
+  app.get(
+    "/api/documents/:id/samples",
+    teacherOrAdmin,
+    wrap(async (req, res) => {
+      const doc = loadDoc(req, { allowDeleted: true });
+      res.json({ samples: listTrainingSamples({ docId: doc.id, limit: 200 }) });
     })
   );
 

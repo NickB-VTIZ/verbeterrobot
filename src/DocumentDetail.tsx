@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Api, ApiError, formatBytes, formatDate } from "./api";
 import { AuthPdf, Banner, EmptyState, Loader, Modal, PurgeDialog, Spinner } from "./ui";
 import { StatusPill } from "./Library";
+import CorrectedUpload from "./CorrectedUpload";
 
 interface VersionInfo {
   versionNumber: number;
@@ -120,10 +121,10 @@ export default function DocumentDetail({ api, role, userName, id, onBack, onMark
 
   // Terwijl er een generatie loopt: elke 4 s verversen.
   useEffect(() => {
-    if (!data?.generating && data?.document.status !== "bezig") return;
+    if (!data?.generating && data?.document.status !== "bezig" && data?.document.proposalStatus !== "bezig") return;
     const t = setInterval(() => load(true, true), 4000);
     return () => clearInterval(t);
-  }, [data?.generating, data?.document.status, load]);
+  }, [data?.generating, data?.document.status, data?.document.proposalStatus, load]);
 
   async function run<T>(label: string, fn: () => Promise<T>, okText?: string): Promise<T | undefined> {
     setBusy(label);
@@ -264,6 +265,24 @@ export default function DocumentDetail({ api, role, userName, id, onBack, onMark
           </span>
         </Banner>
       )}
+      {doc.proposalStatus === "bezig" && !inTrash && (
+        <Banner tone="info">
+          <span className="inline-flex items-center gap-2">
+            <Spinner className="w-4 h-4" /> De AI maakt een eerste grondig voorstel voor de vragen en antwoordplaatsen…
+          </span>
+        </Banner>
+      )}
+      {doc.proposalStatus === "klaar" && !inTrash && data.marks.teacher === 0 && data.marks.proposal > 0 && (
+        <Banner tone="ok">
+          De AI heeft een eerste voorstel gemaakt ({data.marks.proposal} aanduidingen). Open &ldquo;Aanduiden&rdquo; om het na te kijken
+          en aan te passen, of genereer meteen de sleutel.
+        </Banner>
+      )}
+      {doc.proposalStatus === "mislukt" && !inTrash && (
+        <Banner tone="warn">
+          Het automatische voorstel is mislukt{doc.proposalError ? `: ${doc.proposalError}` : "."} Je kan in &ldquo;Aanduiden&rdquo; opnieuw een voorstel laten maken.
+        </Banner>
+      )}
       {error && <Banner tone="error">{error}</Banner>}
       {notice && <Banner tone="ok">{notice}</Banner>}
 
@@ -345,6 +364,8 @@ export default function DocumentDetail({ api, role, userName, id, onBack, onMark
           </div>
         )}
       </section>
+
+      {!inTrash && <CorrectedUpload api={api} docId={id} disabled={!!busy} />}
 
       {/* nakijken */}
       {version && !inTrash && (

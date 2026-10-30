@@ -142,13 +142,14 @@ export function validateAnalysis(parsed, paragraphs, { collect = false, skipCove
 
 /**
  * @param {Array<ParagraphInfo>} paragraphs
- * @param {{extraContext?:string}} opts
+ * @param {{extraContext?:string, subjectContext?:string}} opts
  * @returns {Promise<Array<{qid,question_para_ids,context,slots}>>}
  */
-export async function analyseStructure(paragraphs, { extraContext = "" } = {}) {
+export async function analyseStructure(paragraphs, { extraContext = "", subjectContext = "" } = {}) {
   const payload = JSON.stringify(serializeForPrompt(paragraphs));
   const user =
     (extraContext ? `Extra instructies van de leerkracht: ${extraContext}\n\n` : "") +
+    (subjectContext ? `Achtergrond over het vak (enkel om het soort vragen te begrijpen):\n${String(subjectContext).slice(0, 3000)}\n\n` : "") +
     `Paragrafen:\n${payload}`;
   return askJson(
     [
@@ -158,4 +159,42 @@ export async function analyseStructure(paragraphs, { extraContext = "" } = {}) {
     (parsed) => validateAnalysis(parsed, paragraphs),
     { retries: 2, temperature: 0 }
   );
+}
+
+export const REFINE_PROMPT = `${ANALYSE_PROMPT}
+
+EXTRA OPDRACHT — tweede, grondige controle:
+Je krijgt hieronder ook een EERSTE VOORSTEL van de structuur. Controleer het kritisch en geef de volledige, verbeterde lijst terug in exact hetzelfde formaat:
+- ontbreken er vragen of subvragen? voeg ze toe;
+- horen vragen samen die nu los staan (of omgekeerd)? corrigeer;
+- is het slot-type of "count" fout, of staat een slot op de verkeerde paragraaf (bv. vóór de vraag)? corrigeer;
+- is iets geen echte vraag (titel, instructie, puntenverdeling, formuleblad)? verwijder het;
+- staat er al een modelantwoord in het document? neem dat dan niet op als vraag.
+Behoud alles wat al juist is.`;
+
+/**
+ * Tweede pass: laat het model het eerste voorstel kritisch nakijken. Mislukt dit, dan blijft het eerste voorstel gelden.
+ * @returns {Promise<Array>} verbeterde (of ongewijzigde) vragenlijst
+ */
+export async function refineStructure(paragraphs, questions, { extraContext = "", subjectContext = "" } = {}) {
+  if (!questions?.length) return questions || [];
+  const payload = JSON.stringify(serializeForPrompt(paragraphs));
+  const user =
+    (extraContext ? `Extra instructies van de leerkracht: ${extraContext}\n\n` : "") +
+    (subjectContext ? `Achtergrond over het vak:\n${String(subjectContext).slice(0, 3000)}\n\n` : "") +
+    `Paragrafen:\n${payload}\n\nEerste voorstel:\n${JSON.stringify({ questions })}`;
+  try {
+    const refined = await askJson(
+      [
+        { role: "system", content: REFINE_PROMPT },
+        { role: "user", content: user },
+      ],
+      (parsed) => validateAnalysis(parsed, paragraphs),
+      { retries: 1, temperature: 0 }
+    );
+    return refined?.length ? refined : questions;
+  } catch (err) {
+    console.warn("[analyse] verfijnen mislukt, eerste voorstel behouden:", err.message);
+    return questions;
+  }
 }

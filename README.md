@@ -53,6 +53,9 @@ beheerscherm opslaat (bewaard in `data/settings.json`, in Docker het volume `/ap
 |---|---|---|
 | **Beheer** | `ADMIN_PASSWORD` | Instellingen aanpassen + documenten verbeteren |
 | **Leerkracht** | leerkrachtenwachtwoord | Documenten verbeteren |
+| **Persoonlijk account** (vanaf v1.9.0) | gebruikersnaam + eigen wachtwoord | Rol *leerkracht* of *beheerder*, door het beheer aangemaakt |
+
+Persoonlijke accounts maak je aan in het beheer, tab **Gebruikers** (wachtwoord minstens 8 tekens; rol wijzigen, wachtwoord opnieuw instellen, deactiveren, verwijderen). Op het aanmeldscherm wissel je met de link onderaan tussen het gedeelde wachtwoord en een persoonlijk account. De weergavenaam van het account wordt als naam van de leerkracht gebruikt, zodat eigenaarschap van documenten gewoon blijft werken. De gedeelde wachtwoorden blijven altijd werken.
 
 ### Het beheer (tabs)
 
@@ -65,6 +68,8 @@ De titel toont het versienummer (bv. `Beheer v1.6.0`; ook bij de hoofdtitel en i
 | **Instellingen** | maximale bestandsgrootte, systeemprompt, leerkrachtenwachtwoord |
 | **Vakken** | vakprofielen met onderwerpen, instructies, voorbeelden en referentiemateriaal |
 | **Training** | vrije prompts/lessen (richtlijn, correctie, voorbeeld) |
+| **Trainingsdata** | alles wat de app geleerd heeft: voorbeelden uit verbeterde versies (met oordeel en duiding, filterbaar en verwijderbaar), lessen en feedback op antwoorden |
+| **Gebruikers** | persoonlijke accounts aanmaken en beheren |
 
 **Verbindingstests**
 - *Omniroute*: haalt de modellenlijst op (latency, aantal modellen, staat het gekozen model erin?). De
@@ -196,7 +201,11 @@ Een antwoord komt **nooit** aan het einde van het document terecht: is er voor e
 - Beschikbare back-ups: `docker compose run --rm backup node scripts/restore.mjs --list`.
 - Herstellen: `docker compose stop app`, daarna `docker compose run --rm backup node scripts/restore.mjs <naam|latest> --yes`, daarna `docker compose start app`.
 
-**Tests** (zonder LLM): `npm test` (aanduidingen, docx-pipeline, opslag, bibliotheek-API).
+**Automatisch eerste voorstel (vanaf v1.9.0).** Zodra je een .docx uploadt, start de server op de achtergrond een grondig voorstel: het model duidt vragen, antwoordplaatsen, gegevens en instructies aan en een tweede controleronde (*verfijning*) vult hiaten aan en corrigeert fouten, met de vakcontext en de voorbeelden uit eerdere verbeterde versies als houvast. De status (*bezig / klaar / mislukt*) staat op de detailpagina. In het aanduidingenscherm is het voorstel al ingevuld zolang je zelf nog niets aanduidde; jouw aanduidingen hebben altijd voorrang. Bij een herstart van de server wordt een onderbroken voorstel als *mislukt* gemarkeerd (je kan het opnieuw laten doen met "AI laat een voorstel doen").
+
+**Zelf verbeterde versie uploaden en de app laten leren (vanaf v1.9.0).** Op de detailpagina van een document kan je je eigen verbeterde .docx uploaden. De code vergelijkt de alinea's met het origineel, haalt uit wat jij toevoegde of wijzigde per vraag, en legt dat naast het antwoord van de app. Het resultaat per vraag (*gelijk, afwijkend, enkel van jou, ...*) wordt bewaard als trainingsvoorbeeld; het model geeft (best effort) een korte duiding en formuleert lessen die in de training terechtkomen. Latere generaties gebruiken de voorbeelden als few-shot context, per vak. Opnieuw uploaden vervangt de vorige voorbeelden van dat document. In het beheer (tab *Trainingsdata*) zie en verwijder je alles.
+
+**Tests** (zonder LLM): `npm test` (aanduidingen, docx-pipeline, opslag, bibliotheek-API, gebruikers/trainingsdata/vergelijking).
 
 ### Systeemprompt
 

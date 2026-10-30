@@ -52,9 +52,18 @@ import {
   adminConfigured,
   teacherConfigured,
 } from "./settings.js";
+import { listUsers, createUser, updateUser, deleteUser, verifyUserLogin } from "./users.js";
+import {
+  listTrainingSamples,
+  deleteTrainingSample,
+  trainingSampleCount,
+  listExamples,
+  deleteFeedback,
+} from "./storage/repo.js";
 import {
   createSession,
   destroySession,
+  destroySessionsOfUser,
   requireRole,
   sessionRole,
   sessionUser,
@@ -123,13 +132,34 @@ app.get("/api/subjects", requireRole("teacher", "admin"), (_req, res) =>
 );
 
 // ── Aanmelden ─────────────────────────────────────────────────────────
-// Body: { role: "teacher" | "admin", password }
+// Persoonlijk account: { username, password }
+// Gedeeld wachtwoord:  { role: "teacher" | "admin", name, password }
 app.post("/api/login", (req, res) => {
   const ip = req.ip;
   if (!loginAllowed(ip)) {
     return res
       .status(429)
       .json({ error: "Te veel mislukte pogingen. Probeer het later opnieuw." });
+  }
+
+  if (req.body && typeof req.body.username === "string" && req.body.username.trim()) {
+    const result = verifyUserLogin(req.body.username, req.body.password);
+    if (result.error === "inactief") {
+      registerFailure(ip);
+      return res.status(403).json({ error: "Dit account is uitgeschakeld. Vraag de beheerder om het te activeren." });
+    }
+    if (!result.user) {
+      registerFailure(ip);
+      return res.status(401).json({ error: "Ongeldige gebruikersnaam of wachtwoord." });
+    }
+    registerSuccess(ip);
+    const u = result.user;
+    return res.json({
+      ok: true,
+      role: u.role,
+      name: u.displayName,
+      token: createSession(u.role, u.displayName, u.id),
+    });
   }
 
   const { role, password } = req.body || {};
@@ -270,6 +300,63 @@ app.post("/api/admin/training", requireRole("admin"), async (req, res) => {
   }
 });
 app.delete("/api/admin/training/:id", requireRole("admin"), handle((req) => deleteLesson(req.params.id)));
+
+// ── Beheer: gebruikers ────────────────────────────────────────────────
+app.get("/api/admin/users", requireRole("admin"), (_req, res) => res.json({ users: listUsers() }));
+app.post(
+  "/api/admin/users",
+  requireRole("admin"),
+  handle((req) => {
+    const user = createUser(req.body || {});
+    audit(null, req.user, req.role, "gebruiker_aangemaakt", { username: user.username, role: user.role });
+    return { user };
+  })
+);
+app.patch(
+  "/api/admin/users/:id",
+  requireRole("admin"),
+  handle((req) => {
+    const body = req.body || {};
+    const user = updateUser(req.params.id, body);
+    if (body.active === false || (body.password !== undefined && body.password !== "")) {
+      destroySessionsOfUser(user.id);
+    }
+    audit(null, req.user, req.role, "gebruiker_gewijzigd", {
+      username: user.username,
+      actief: user.active,
+      wachtwoordGewijzigd: !!body.password,
+    });
+    return { user };
+  })
+);
+app.delete(
+  "/api/admin/users/:id",
+  requireRole("admin"),
+  handle((req) => {
+    const ok = deleteUser(req.params.id);
+    if (!ok) throw new Error("Gebruiker niet gevonden.");
+    destroySessionsOfUser(req.params.id);
+    audit(null, req.user, req.role, "gebruiker_verwijderd", { id: req.params.id });
+    return { ok: true };
+  })
+);
+
+// ── Beheer: trainingsdata (alles wat de app geleerd heeft) ────────────
+app.get("/api/admin/training-data", requireRole("admin"), (_req, res) =>
+  res.json({
+    lessons: listLessons(),
+    samples: listTrainingSamples({ limit: 500 }),
+    sampleCount: trainingSampleCount(),
+    feedback: listExamples({ limit: 500 }),
+    memoryActive: memoryActive(),
+  })
+);
+app.delete("/api/admin/training-data/samples/:id", requireRole("admin"), handle((req) => {
+  if (!deleteTrainingSample(req.params.id)) throw new Error("Voorbeeld niet gevonden.");
+}));
+app.delete("/api/admin/training-data/feedback/:id", requireRole("admin"), handle((req) => {
+  if (!deleteFeedback(req.params.id)) throw new Error("Voorbeeld niet gevonden.");
+}));
 
 // Statusoverzicht voor het beheerscherm
 app.get("/api/admin/status", requireRole("admin"), async (_req, res) => {

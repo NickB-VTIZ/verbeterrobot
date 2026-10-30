@@ -3,6 +3,8 @@ import { createApi } from "./api";
 import AdminOverview from "./AdminOverview";
 import SubjectsAdmin from "./SubjectsAdmin";
 import TrainingAdmin from "./TrainingAdmin";
+import UsersAdmin from "./UsersAdmin";
+import TrainingData from "./TrainingData";
 
 interface PublicSettings {
   omnirouteBaseUrl: string;
@@ -63,7 +65,7 @@ interface Status {
   maxFileMb: number;
 }
 
-type Tab = "status" | "overzicht" | "verbindingen" | "instellingen" | "vakken" | "training";
+type Tab = "status" | "overzicht" | "verbindingen" | "instellingen" | "vakken" | "training" | "gebruikers" | "trainingsdata";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "status", label: "Status" },
@@ -72,6 +74,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "instellingen", label: "Instellingen" },
   { id: "vakken", label: "Vakken" },
   { id: "training", label: "Training" },
+  { id: "trainingsdata", label: "Trainingsdata" },
+  { id: "gebruikers", label: "Gebruikers" },
 ];
 
 interface Props {
@@ -750,6 +754,8 @@ export default function Admin({ token, version, onUnauthorized, onUseTool, onLog
       {tab === "overzicht" && <AdminOverview api={adminApi} />}
       {tab === "vakken" && <SubjectsAdmin token={token} onUnauthorized={onUnauthorized} />}
       {tab === "training" && <TrainingAdmin token={token} onUnauthorized={onUnauthorized} />}
+      {tab === "trainingsdata" && <TrainingData token={token} onUnauthorized={onUnauthorized} />}
+      {tab === "gebruikers" && <UsersAdmin token={token} onUnauthorized={onUnauthorized} />}
     </div>
   );
 }

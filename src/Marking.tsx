@@ -73,6 +73,9 @@ export default function Marking({ api, id, onBack, onDone }: Props) {
   const [viewMode, setViewMode] = useState<"document" | "lijst">("document");
   const [showOriginal, setShowOriginal] = useState(false);
   const rowRefs = useRef<Record<string, HTMLElement | null>>({});
+  const [proposalStatus, setProposalStatus] = useState<string>("geen");
+  const marksRef = useRef<Record<string, Mark>>({});
+  marksRef.current = marks;
 
   const normalize = useCallback((list: any[]): Mark[] => {
     return (list || []).map(m => ({
@@ -92,7 +95,7 @@ export default function Marking({ api, id, onBack, onDone }: Props) {
     (async () => {
       try {
         const [docRes, res] = await Promise.all([
-          api.json<{ document: { title?: string; originalFilename?: string } }>(`/api/documents/${id}`),
+          api.json<{ document: { title?: string; originalFilename?: string; proposalStatus?: string } }>(`/api/documents/${id}`),
           api.json<{ paragraphs: Para[]; marks: any[]; proposal: any[] }>(`/api/documents/${id}/paragraphs`),
         ]);
         if (cancelled) return;
@@ -101,7 +104,21 @@ export default function Marking({ api, id, onBack, onDone }: Props) {
         const map: Record<string, Mark> = {};
         for (const m of normalize(res.marks)) if (!map[m.paraId]) map[m.paraId] = m;
         setMarks(map);
-        setProposal(normalize(res.proposal));
+        const prop = normalize(res.proposal);
+        setProposal(prop);
+        setProposalStatus(docRes.document.proposalStatus || "geen");
+        // Nog geen eigen aanduidingen: begin meteen met het AI-voorstel.
+        if (Object.keys(map).length === 0 && prop.length > 0) {
+          const ids = new Set(res.paragraphs.map(p => p.id));
+          const start: Record<string, Mark> = {};
+          for (const m of prop) if (ids.has(m.paraId) && !start[m.paraId]) start[m.paraId] = { ...m };
+          setMarks(start);
+          setDirty(true);
+          setMessage({
+            tone: "info",
+            text: "Het AI-voorstel is al ingevuld als startpunt. Controleer het, pas aan waar nodig en sla op.",
+          });
+        }
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : "Laden mislukt.");
       } finally {
@@ -112,6 +129,42 @@ export default function Marking({ api, id, onBack, onDone }: Props) {
       cancelled = true;
     };
   }, [api, id, normalize]);
+
+  // Terwijl de AI nog een eerste voorstel maakt: elke 4 s controleren.
+  useEffect(() => {
+    if (proposalStatus !== "bezig") return;
+    let cancelled = false;
+    const t = setInterval(async () => {
+      try {
+        const d = await api.json<{ document: { proposalStatus?: string } }>(`/api/documents/${id}`);
+        const st = d.document.proposalStatus || "geen";
+        if (cancelled || st === "bezig") return;
+        const res = await api.json<{ paragraphs: Para[]; proposal: any[] }>(`/api/documents/${id}/paragraphs`);
+        if (cancelled) return;
+        const prop = normalize(res.proposal);
+        setProposal(prop);
+        setProposalStatus(st);
+        if (st === "klaar" && prop.length > 0 && Object.keys(marksRef.current).length === 0) {
+          const ids = new Set(res.paragraphs.map(p => p.id));
+          const start: Record<string, Mark> = {};
+          for (const m of prop) if (ids.has(m.paraId) && !start[m.paraId]) start[m.paraId] = { ...m };
+          setMarks(start);
+          setDirty(true);
+          setMessage({ tone: "ok", text: "Het AI-voorstel is klaar en ingevuld. Controleer het en sla op." });
+        } else if (st === "klaar") {
+          setMessage({ tone: "ok", text: "Het AI-voorstel is klaar. Neem het over via de knoppen hieronder." });
+        } else if (st === "mislukt") {
+          setMessage({ tone: "warn", text: "Het automatische voorstel is mislukt. Je kan het opnieuw laten maken." });
+        }
+      } catch {
+        /* volgende poging */
+      }
+    }, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [proposalStatus, api, id, normalize]);
 
   const order = useMemo(() => new Map(paras.map((p, i) => [p.id, i])), [paras]);
 

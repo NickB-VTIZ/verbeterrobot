@@ -11,7 +11,7 @@ import { fileURLToPath } from "url";
 import JSZip from "jszip";
 import { DOMParser } from "@xmldom/xmldom";
 import { extractParagraphs, W_NS, countPlaceholders } from "./extract.js";
-import { analyseStructure } from "./analyse.js";
+import { analyseStructure, refineStructure } from "./analyse.js";
 import { solveQuestion } from "./solve.js";
 import { applySlots, serializeDocument } from "./insert.js";
 import { visualCheck } from "./visual.js";
@@ -120,11 +120,15 @@ export async function extractDocxParagraphs(filePath) {
   return extractParagraphs(xmlString).paragraphs;
 }
 
-/** Laat het taalmodel een voorstel doen voor de structuur (vragen + antwoordplaatsen). */
-export async function proposeStructure(filePath, { extraContext = "" } = {}) {
+/**
+ * Laat het taalmodel een voorstel doen voor de structuur (vragen + antwoordplaatsen).
+ * Met `refine` volgt een tweede, kritische controle-pass (grondiger, maar een extra LLM-aanroep).
+ */
+export async function proposeStructure(filePath, { extraContext = "", subjectContext = "", refine = false } = {}) {
   const { xmlString } = await loadDocx(filePath);
   const { paragraphs } = extractParagraphs(xmlString);
-  const questions = await analyseStructure(paragraphs, { extraContext });
+  let questions = await analyseStructure(paragraphs, { extraContext, subjectContext });
+  if (refine) questions = await refineStructure(paragraphs, questions, { extraContext, subjectContext });
   return { paragraphs, questions };
 }
 
