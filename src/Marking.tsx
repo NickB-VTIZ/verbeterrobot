@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Api, ApiError } from "./api";
-import { Banner, EmptyState, Loader, Spinner } from "./ui";
+import { AuthPdf, Banner, EmptyState, Loader, Spinner } from "./ui";
+import DocView from "./DocView";
+import { Mark, Para, ROLE_META, ROLE_ORDER, Role, SLOT_LABEL } from "./markingTypes";
 
 /**
  * Aanduiden (Probleem 2): de leerkracht duidt per alinea aan wat het is.
@@ -8,33 +10,6 @@ import { Banner, EmptyState, Loader, Spinner } from "./ui";
  * (vraag, antwoordplaats, gegeven, formuleblad, instructie, modelantwoord) bepaalt
  * waar de code later het rode antwoord invoegt. Werkt met aanraking (grote knoppen).
  */
-
-type Role = "vraag" | "antwoordplaats" | "gegeven" | "formuleblad" | "instructie" | "modelantwoord";
-
-interface Para {
-  id: string;
-  text: string;
-  style: string | null;
-  headingLevel: number | null;
-  isList: boolean;
-  bold: boolean;
-  isEmpty: boolean;
-  isPageBreak: boolean;
-  inTable: boolean;
-  tableCoord: { row: number; cell: number } | null;
-  placeholders: number;
-}
-
-interface Mark {
-  paraId: string;
-  role: Role;
-  qid: string;
-  subNr: string;
-  slotType: string | null;
-  slotCount: number | null;
-  linkedParaIds: string[];
-  teacherAnswer: string | null;
-}
 
 interface SaveResult {
   saved: number;
@@ -49,61 +24,6 @@ interface Props {
   onBack: () => void;
   onDone: (id: string) => void;
 }
-
-const ROLE_META: Record<Role, { label: string; hint: string; bar: string; bg: string; active: string }> = {
-  vraag: {
-    label: "Vraag",
-    hint: "Opgave of deelvraag",
-    bar: "border-l-blue-500",
-    bg: "bg-blue-50",
-    active: "bg-blue-600 text-white border-blue-600",
-  },
-  antwoordplaats: {
-    label: "Antwoordplaats",
-    hint: "Hier komt het rode antwoord",
-    bar: "border-l-red-500",
-    bg: "bg-red-50",
-    active: "bg-red-600 text-white border-red-600",
-  },
-  gegeven: {
-    label: "Gegeven",
-    hint: "Context, tekst, tabel bij een vraag",
-    bar: "border-l-amber-500",
-    bg: "bg-amber-50",
-    active: "bg-amber-500 text-white border-amber-500",
-  },
-  formuleblad: {
-    label: "Formuleblad",
-    hint: "Referentie voor de AI",
-    bar: "border-l-purple-500",
-    bg: "bg-purple-50",
-    active: "bg-purple-600 text-white border-purple-600",
-  },
-  instructie: {
-    label: "Negeren",
-    hint: "Titel of instructie, niets invullen",
-    bar: "border-l-gray-400",
-    bg: "bg-gray-100",
-    active: "bg-gray-600 text-white border-gray-600",
-  },
-  modelantwoord: {
-    label: "Modelantwoord",
-    hint: "Antwoord dat al in het document staat",
-    bar: "border-l-green-500",
-    bg: "bg-green-50",
-    active: "bg-green-600 text-white border-green-600",
-  },
-};
-
-const ROLE_ORDER: Role[] = ["vraag", "antwoordplaats", "gegeven", "formuleblad", "modelantwoord", "instructie"];
-
-const SLOT_LABEL: Record<string, string> = {
-  fill_placeholders: "Invulpunten (…) in de tekst invullen",
-  append: "Achter de tekst van deze regel",
-  fill_empty_following: "In de lege regels eronder",
-  insert_after: "Nieuwe regel eronder invoegen",
-  fill_cell: "In deze (lege) tabelcel",
-};
 
 /** Zelfde logica als de server (marks.js defaultSlot), enkel als voorstel. */
 function defaultSlot(p: Para, all: Para[]): { slotType: string; slotCount: number } {
@@ -150,7 +70,9 @@ export default function Marking({ api, id, onBack, onDone }: Props) {
   const [message, setMessage] = useState<{ tone: "error" | "ok" | "warn" | "info"; text: string } | null>(null);
   const [context, setContext] = useState("");
   const [showOverview, setShowOverview] = useState(true);
-  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [viewMode, setViewMode] = useState<"document" | "lijst">("document");
+  const [showOriginal, setShowOriginal] = useState(false);
+  const rowRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const normalize = useCallback((list: any[]): Mark[] => {
     return (list || []).map(m => ({
@@ -560,6 +482,7 @@ export default function Marking({ api, id, onBack, onDone }: Props) {
       </div>
     );
 
+  const selectedPara = selected ? paras.find(p => p.id === selected) || null : null;
   const markCount = marksList.length;
   const generating = busy === "generate";
 
@@ -578,7 +501,9 @@ export default function Marking({ api, id, onBack, onDone }: Props) {
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-semibold text-gray-900 truncate">Aanduiden: {title}</h2>
           <p className="text-xs text-gray-500">
-            Tik op een alinea en kies wat het is. Zo weet de robot precies waar elk antwoord komt.
+            {viewMode === "document"
+              ? "Klik in het voorbeeld op de tekst die je wil aanduiden: is het de vraag, of staat daar het antwoord? Zo weet de robot precies waar elk antwoord komt."
+              : "Tik op een alinea en kies wat het is. Zo weet de robot precies waar elk antwoord komt."}
           </p>
         </div>
       </div>
@@ -731,7 +656,94 @@ export default function Marking({ api, id, onBack, onDone }: Props) {
           Dit document bevat geen tekst die aangeduid kan worden.
         </EmptyState>
       ) : (
-        <div className="space-y-1.5 pb-24">{paras.map(renderParagraph)}</div>
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden" role="group" aria-label="Weergave">
+              {(["document", "lijst"] as const).map(v => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setViewMode(v)}
+                  aria-pressed={viewMode === v}
+                  className={`px-3 py-1.5 text-sm font-medium ${
+                    viewMode === v ? "bg-gray-800 text-white" : "bg-white text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {v === "document" ? "Voorbeeld van het document" : "Lijst met alinea's"}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="btn-sm" onClick={() => setShowOriginal(v => !v)}>
+              {showOriginal ? "Origineel verbergen" : "Origineel bekijken (pdf)"}
+            </button>
+          </div>
+
+          {showOriginal && (
+            <div className="card p-3 space-y-2">
+              <p className="text-xs text-gray-500">
+                Zo ziet het originele document eruit. Gebruik het als houvast; aanduiden doe je in het voorbeeld hierboven.
+              </p>
+              <AuthPdf api={api} url={`/api/documents/${id}/preview/original/pdf`} title="Origineel document" />
+            </div>
+          )}
+
+          {viewMode === "document" ? (
+            <div className="pb-4">
+              <DocView
+                paras={paras}
+                marks={marks}
+                proposal={proposal}
+                selected={selected}
+                onSelect={setSelected}
+                setRef={(pid, el) => {
+                  rowRefs.current[pid] = el;
+                }}
+              />
+            </div>
+          ) : (
+            <div className="space-y-1.5 pb-24">{paras.map(renderParagraph)}</div>
+          )}
+
+          {viewMode === "document" && selectedPara && (
+            <div className="card p-4 sticky bottom-2 z-20 max-h-[60vh] overflow-y-auto shadow-lg border-gray-400">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-gray-500">
+                    <code>{selectedPara.id}</code>
+                    {selectedPara.inTable && selectedPara.tableCoord
+                      ? ` · tabel rij ${selectedPara.tableCoord.row}, cel ${selectedPara.tableCoord.cell}`
+                      : ""}
+                  </p>
+                  <p className="text-sm text-gray-800 truncate">
+                    {selectedPara.isEmpty ? "(lege regel)" : selectedPara.text}
+                  </p>
+                </div>
+                <button type="button" className="btn-sm" onClick={() => setSelected(null)}>
+                  Sluiten
+                </button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {ROLE_ORDER.map(r => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setRole(selectedPara, r)}
+                    className={`min-h-[44px] px-3 rounded-lg border text-sm font-medium transition-colors ${
+                      marks[selectedPara.id]?.role === r
+                        ? ROLE_META[r].active
+                        : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                    }`}
+                    aria-pressed={marks[selectedPara.id]?.role === r}
+                    title={ROLE_META[r].hint}
+                  >
+                    {ROLE_META[r].label}
+                  </button>
+                ))}
+              </div>
+              {marks[selectedPara.id] && renderEditor(selectedPara, marks[selectedPara.id])}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
