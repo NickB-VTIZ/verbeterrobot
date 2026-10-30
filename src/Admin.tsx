@@ -67,16 +67,40 @@ interface Status {
 
 type Tab = "status" | "overzicht" | "verbindingen" | "instellingen" | "vakken" | "training" | "gebruikers" | "trainingsdata";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "status", label: "Status" },
-  { id: "overzicht", label: "Overzicht" },
-  { id: "verbindingen", label: "Verbindingen" },
-  { id: "instellingen", label: "Instellingen" },
-  { id: "vakken", label: "Vakken" },
-  { id: "training", label: "Training" },
-  { id: "trainingsdata", label: "Trainingsdata" },
-  { id: "gebruikers", label: "Gebruikers" },
+interface TabDef {
+  id: Tab;
+  label: string;
+  icon: string;
+  desc: string;
+}
+
+const TAB_GROUPS: { title: string; tabs: TabDef[] }[] = [
+  {
+    title: "Systeem",
+    tabs: [
+      { id: "status", label: "Status", icon: "🩺", desc: "Gezondheid van de app en de koppelingen in één oogopslag." },
+      { id: "verbindingen", label: "Verbindingen", icon: "🔌", desc: "Omniroute (AI-model) en het geheugen (agentmemory) instellen en testen." },
+      { id: "instellingen", label: "Instellingen", icon: "⚙️", desc: "Wachtwoorden en algemene instellingen van de app." },
+    ],
+  },
+  {
+    title: "Inhoud & training",
+    tabs: [
+      { id: "vakken", label: "Vakken", icon: "📘", desc: "Vakken, onderwerpen en de instructies waarmee de robot per vak werkt." },
+      { id: "training", label: "Training", icon: "🎓", desc: "Lessen en richtlijnen die de robot meekrijgt bij elke opdracht." },
+      { id: "trainingsdata", label: "Trainingsdata", icon: "🧠", desc: "Alles waaruit de robot leert: verbeterde versies, lessen en feedback." },
+    ],
+  },
+  {
+    title: "Gebruik",
+    tabs: [
+      { id: "overzicht", label: "Overzicht", icon: "📊", desc: "Alle documenten en het gebruik van de robot." },
+      { id: "gebruikers", label: "Gebruikers", icon: "👥", desc: "Persoonlijke accounts met wachtwoord aanmaken en beheren." },
+    ],
+  },
 ];
+
+const TABS: TabDef[] = TAB_GROUPS.flatMap(g => g.tabs);
 
 interface Props {
   token: string;
@@ -347,52 +371,86 @@ export default function Admin({ token, version, onUnauthorized, onUseTool, onLog
       : "err"
     : "warn";
 
-  return (
-    <div className="space-y-6">
-      {/* Titel + versie */}
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-xl font-bold text-gray-900">
-          Beheer{" "}
-          <span className="align-middle text-xs font-semibold text-red-700 bg-red-50 rounded-full px-2 py-0.5">
-            v{version || status?.version || "?"}
-          </span>
-        </h2>
-        <div className="flex gap-2">
-          <button type="button" onClick={onUseTool} className="btn-secondary !px-3 !py-1.5">
-            Document verbeteren
-          </button>
-          <button type="button" onClick={onLogout} className="btn-secondary !px-3 !py-1.5">
-            Afmelden
-          </button>
-        </div>
-      </div>
+  const current = TABS.find(t => t.id === tab) ?? TABS[0];
+  const connError = omniTone === "err" || memTone === "err";
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-gray-200 overflow-x-auto" role="tablist">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => {
-              setTab(t.id);
-              setMsg(null);
-              if (t.id === "status") loadStatus().catch(() => undefined);
-            }}
-            className={`px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors ${
-              tab === t.id
-                ? "border-red-600 text-red-700"
-                : "border-transparent text-gray-500 hover:text-gray-800"
-            }`}
-          >
-            {t.label}
-            {t.id === "verbindingen" && (omniTone === "err" || memTone === "err") && (
-              <span className="ml-1.5"><Dot tone="err" /></span>
-            )}
-          </button>
-        ))}
-      </div>
+  function goTab(id: Tab) {
+    setTab(id);
+    setMsg(null);
+    if (id === "status") loadStatus().catch(() => undefined);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  return (
+    <div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-6 lg:items-start">
+      {/* ── Menu: zijbalk op grote schermen, horizontale pills op kleine ── */}
+      <aside className="lg:sticky lg:top-4 mb-4 lg:mb-0">
+        {/* Mobiel / tablet */}
+        <nav className="lg:hidden -mx-3 sm:mx-0 px-3 sm:px-0 overflow-x-auto" aria-label="Beheermenu">
+          <div className="flex gap-2 pb-2 w-max sm:w-auto sm:flex-wrap" role="tablist">
+            {TABS.map(t => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                onClick={() => goTab(t.id)}
+                className={`nav-pill ${tab === t.id ? "nav-pill-active" : ""}`}
+              >
+                <span aria-hidden="true">{t.icon}</span>
+                {t.label}
+                {t.id === "verbindingen" && connError && <Dot tone="err" />}
+              </button>
+            ))}
+          </div>
+        </nav>
+
+        {/* Desktop */}
+        <nav className="hidden lg:block card p-2" aria-label="Beheermenu">
+          <div className="px-3 pt-2 pb-1 flex items-center justify-between">
+            <span className="font-bold text-gray-900">Beheer</span>
+            <span className="text-xs font-semibold text-red-700 bg-red-50 rounded-full px-2 py-0.5">
+              v{version || status?.version || "?"}
+            </span>
+          </div>
+          {TAB_GROUPS.map(g => (
+            <div key={g.title} role="group" aria-label={g.title}>
+              <p className="nav-group-title">{g.title}</p>
+              <div className="space-y-0.5">
+                {g.tabs.map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    aria-current={tab === t.id ? "page" : undefined}
+                    onClick={() => goTab(t.id)}
+                    className={`nav-item ${tab === t.id ? "nav-item-active" : ""}`}
+                  >
+                    <span className="text-base w-5 text-center" aria-hidden="true">{t.icon}</span>
+                    <span className="flex-1">{t.label}</span>
+                    {t.id === "verbindingen" && connError && <Dot tone="err" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="mt-3 pt-2 border-t border-gray-100 space-y-0.5">
+            <button type="button" onClick={onUseTool} className="nav-item">
+              <span className="text-base w-5 text-center" aria-hidden="true">📄</span>
+              Document verbeteren
+            </button>
+          </div>
+        </nav>
+      </aside>
+
+      {/* ── Inhoud ── */}
+      <section className="min-w-0 card p-4 sm:p-6 space-y-6">
+      <header className="border-b border-gray-100 pb-4">
+        <h2 className="page-title flex items-center gap-2">
+          <span aria-hidden="true">{current.icon}</span>
+          {current.label}
+        </h2>
+        <p className="page-lead">{current.desc}</p>
+      </header>
 
       {/* ── Status ─────────────────────────────────────────────── */}
       {tab === "status" && (
@@ -756,6 +814,7 @@ export default function Admin({ token, version, onUnauthorized, onUseTool, onLog
       {tab === "training" && <TrainingAdmin token={token} onUnauthorized={onUnauthorized} />}
       {tab === "trainingsdata" && <TrainingData token={token} onUnauthorized={onUnauthorized} />}
       {tab === "gebruikers" && <UsersAdmin token={token} onUnauthorized={onUnauthorized} />}
+      </section>
     </div>
   );
 }

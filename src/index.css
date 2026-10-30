@@ -88,9 +88,50 @@ html.dark { color-scheme: dark; }
   .card {
     @apply bg-white rounded-xl border border-gray-200 shadow-sm;
   }
+  .btn-sm-active {
+    @apply !bg-red-50 !border-red-200 !text-red-700;
+  }
+  .page-title {
+    @apply text-xl sm:text-2xl font-bold text-gray-900;
+  }
+  .page-lead {
+    @apply text-sm text-gray-500 mt-1;
+  }
+  .stat-tile {
+    @apply rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm;
+  }
+  .nav-group-title {
+    @apply px-3 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400;
+  }
+  .nav-item {
+    @apply w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 transition-colors;
+  }
+  .nav-item-active {
+    @apply !bg-red-50 !text-red-700;
+  }
+  .nav-pill {
+    @apply inline-flex shrink-0 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 transition-colors;
+  }
+  .nav-pill-active {
+    @apply !border-red-300 !bg-red-50 !text-red-700;
+  }
 }
 .dark .btn-sm { background-color: #1e293b; color: #e2e8f0; border-color: #475569; }
 .dark .btn-sm:hover { background-color: #273449; }
+.dark .btn-sm-active { background-color: #3b1d20; border-color: #7f1d1d; color: #f87171; }
+.dark .nav-item { color: #b6c2d1; }
+.dark .nav-item:hover { background-color: #273449; color: #f1f5f9; }
+.dark .nav-item-active { background-color: #3b1d20; color: #f87171; }
+.dark .nav-pill { background-color: #1e293b; border-color: #334155; color: #b6c2d1; }
+.dark .nav-pill-active { background-color: #3b1d20; border-color: #7f1d1d; color: #f87171; }
+.dark .stat-tile { background-color: #1e293b; border-color: #334155; }
+.dark .page-title { color: #f1f5f9; }
+
+/* Kleine schermen: iets compactere kaarten/knoppen, grotere tikdoelen */
+@media (max-width: 640px) {
+  .btn-primary, .btn-secondary { @apply px-4; }
+  .btn-sm { @apply py-2; }
+}
 
 /* ── Robot-animaties ─────────────────────────────────────────────── */
 @keyframes robot-float  { 0%,100% { transform: translateY(0); }  50% { transform: translateY(-4px); } }

@@ -228,6 +228,8 @@ De app is bereikbaar op `http://<host>:3010`.
 
 De voorbeelden (origineel en sleutel naast elkaar) worden zonder het paginaoverzicht van de PDF-viewer getoond, zodat ze de volle breedte gebruiken; via *Open in nieuw tabblad* krijg je de volledige viewer. Terwijl de AI bezig is (voorstel of sleutel) toont de app een duidelijk voortgangspaneel met verstreken tijd en de lopende stappen.
 
+**Duidelijker beheer en adaptieve UI (vanaf v1.10.0).** Het beheer gebruikt nu de volle breedte met dezelfde kop als de rest van de app (Bibliotheek / Beheer / Afmelden). Het menu is gegroepeerd in *Systeem* (Status, Verbindingen, Instellingen), *Inhoud & training* (Vakken, Training, Trainingsdata) en *Gebruik* (Overzicht, Gebruikers), met icoon en een korte uitleg per pagina. Op grote schermen staat het als vaste zijbalk, op tablet en gsm als horizontaal scrollbare knoppen. Trainingsdata toont samenvattende tegels (voorbeelden, lessen, feedback, geheugenstatus) en een duidelijke lege staat.
+
 ---
 
 ## Veiligheidsnota's

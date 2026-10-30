@@ -111,15 +111,30 @@ export default function TrainingData({ token, onUnauthorized }: Props) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-bold text-gray-900">Trainingsdata</h3>
-        <p className="text-xs text-gray-500 mt-1">
-          Overzicht van alles waaruit de robot leert: vergelijkingen met zelf verbeterde versies,
-          lessen en feedback van leerkrachten. Afwijkende en nieuwe antwoorden worden als voorbeeld
-          aan de prompt toegevoegd (eerst vakspecifiek). Geheugen (agentmemory):{" "}
-          <strong className={memoryOn ? "text-green-700" : "text-gray-500"}>{memoryOn ? "actief" : "uit"}</strong>
-        </p>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="stat-tile">
+          <p className="text-xs text-gray-400">Voorbeelden</p>
+          <p className="text-xl font-bold text-gray-900">{sampleCount}</p>
+        </div>
+        <div className="stat-tile">
+          <p className="text-xs text-gray-400">Lessen</p>
+          <p className="text-xl font-bold text-gray-900">{lessons.length}</p>
+        </div>
+        <div className="stat-tile">
+          <p className="text-xs text-gray-400">Feedback</p>
+          <p className="text-xl font-bold text-gray-900">{feedback.length}</p>
+        </div>
+        <div className="stat-tile">
+          <p className="text-xs text-gray-400">Geheugen (agentmemory)</p>
+          <p className={`text-xl font-bold ${memoryOn ? "text-green-700" : "text-gray-500"}`}>
+            {memoryOn ? "● actief" : "○ uit"}
+          </p>
+        </div>
       </div>
+      <p className="text-xs text-gray-500">
+        Afwijkende en nieuwe antwoorden uit zelf verbeterde versies worden als voorbeeld aan de prompt
+        toegevoegd (eerst vakspecifiek). Lessen en feedback van leerkrachten tellen ook mee.
+      </p>
 
       {msg && (
         <div
@@ -154,9 +169,17 @@ export default function TrainingData({ token, onUnauthorized }: Props) {
           </div>
         </div>
         {loaded && shown.length === 0 && (
-          <p className="text-sm text-gray-500">
-            Nog geen voorbeelden. Upload bij een document een zelf verbeterde versie om de robot te trainen.
-          </p>
+          <div className="rounded-xl border border-dashed border-gray-300 px-4 py-8 text-center">
+            <p className="text-3xl" aria-hidden="true">🧠</p>
+            <p className="mt-2 text-sm font-semibold text-gray-700">
+              {samples.length === 0 ? "Nog geen voorbeelden" : "Geen voorbeelden met dit filter"}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              {samples.length === 0
+                ? "Open een document in de bibliotheek en upload een zelf verbeterde versie om de robot te trainen."
+                : "Kies een ander filter om de andere voorbeelden te zien."}
+            </p>
+          </div>
         )}
         {shown.map(s => {
           const v = VERDICT[s.verdict] || { label: s.verdict, cls: "bg-gray-100 text-gray-700" };

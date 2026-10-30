@@ -447,7 +447,7 @@ export default function App() {
       : 0;
 
   // ── Render ─────────────────────────────────────────────────────────
-  const wide = step === "library" || step === "document" || step === "mark";
+  const wide = step === "library" || step === "document" || step === "mark" || step === "admin";
 
   const themeToggle = (
     <button
@@ -465,29 +465,57 @@ export default function App() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-red-50">
         {themeToggle}
-        <header className="max-w-6xl mx-auto px-4 pt-4 pb-2 flex flex-wrap items-center gap-3 pr-16">
+        <header className="app-header max-w-6xl mx-auto px-3 sm:px-4 pt-3 sm:pt-4 pb-2 flex flex-wrap items-center gap-x-3 gap-y-2 pr-16">
           <button
             type="button"
-            className="flex items-center gap-2 text-xl font-bold text-gray-900"
+            className="flex items-center gap-2 text-lg sm:text-xl font-bold text-gray-900"
             onClick={() => setStep("library")}
           >
             <RobotMascot mood="idle" className="w-8 h-9" />
-            Verbeterrobot
+            <span>Verbeterrobot</span>
             {version && (
-              <span className="text-xs font-semibold text-red-700 bg-red-50 rounded-full px-2 py-0.5">v{version}</span>
+              <span className="hidden sm:inline text-xs font-semibold text-red-700 bg-red-50 rounded-full px-2 py-0.5">
+                v{version}
+              </span>
             )}
           </button>
-          <span className="ml-auto text-sm text-gray-500">{userName}</span>
-          {role === "admin" && (
-            <button type="button" onClick={() => setStep("admin")} className="btn-sm">
-              Beheer
+          <nav className="flex items-center gap-1.5 ml-auto" aria-label="Hoofdmenu">
+            <span className="hidden md:inline text-sm text-gray-500 mr-1 truncate max-w-[12rem]" title={userName}>
+              👤 {userName}
+            </span>
+            <button
+              type="button"
+              onClick={() => setStep("library")}
+              className={`btn-sm ${step !== "admin" ? "btn-sm-active" : ""}`}
+              aria-current={step !== "admin" ? "page" : undefined}
+            >
+              📚 Bibliotheek
             </button>
-          )}
-          <button type="button" onClick={handleLogout} className="btn-sm">
-            Afmelden
-          </button>
+            {role === "admin" && (
+              <button
+                type="button"
+                onClick={() => setStep("admin")}
+                className={`btn-sm ${step === "admin" ? "btn-sm-active" : ""}`}
+                aria-current={step === "admin" ? "page" : undefined}
+              >
+                ⚙️ Beheer
+              </button>
+            )}
+            <button type="button" onClick={handleLogout} className="btn-sm">
+              Afmelden
+            </button>
+          </nav>
         </header>
-        <main className="max-w-6xl mx-auto px-4 pb-10 pt-2">
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 pb-10 pt-2">
+          {step === "admin" && (
+            <Admin
+              token={token}
+              version={version}
+              onUnauthorized={sessionExpired}
+              onUseTool={() => setStep("upload")}
+              onLogout={handleLogout}
+            />
+          )}
           {step === "library" && (
             <Library
               api={api}
@@ -528,7 +556,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-gray-50 to-red-50">
       {themeToggle}
       {/* Header: robot met denkballon */}
-      <div className={`mb-6 w-full ${step === "admin" ? "max-w-2xl" : "max-w-lg"}`}>
+      <div className="mb-6 w-full max-w-lg">
         <h1 className="text-3xl font-bold text-gray-900 text-center">
           Verbeterrobot
           {version && (
@@ -549,7 +577,7 @@ export default function App() {
         )}
       </div>
 
-      <div className={`w-full ${step === "admin" ? "max-w-2xl" : "max-w-lg"} bg-white rounded-2xl shadow-lg p-8`}>
+      <div className="w-full max-w-lg bg-white rounded-2xl shadow-lg p-5 sm:p-8">
 
         {/* ── Stap 1: Aanmelden ── */}
         {step === "login" && (
@@ -657,17 +685,6 @@ export default function App() {
               {personal ? "Aanmelden met het gedeelde wachtwoord" : "Aanmelden met een persoonlijk account"}
             </button>
           </form>
-        )}
-
-        {/* ── Beheer ── */}
-        {step === "admin" && (
-          <Admin
-            token={token}
-            version={version}
-            onUnauthorized={sessionExpired}
-            onUseTool={() => setStep("library")}
-            onLogout={handleLogout}
-          />
         )}
 
         {/* ── Stap 2: Upload ── */}
