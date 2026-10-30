@@ -77,8 +77,83 @@ export function AuthImage({ api, url, alt, className = "" }: { api: Api; url: st
   return <img src={src} alt={alt} className={className} loading="lazy" />;
 }
 
-/** PDF-voorbeeld in een iframe (met Authorization opgehaald als blob). */
-export function AuthPdf({ api, url, title }: { api: Api; url: string | null; title: string }) {
+/**
+ * Duidelijke "AI is bezig"-weergave: grote spinner, uitleg, lopende stappen en verstreken tijd.
+ * `compact` toont een kleinere versie (bv. als overlay of in een kolom).
+ */
+export function GeneratingPanel({
+  title,
+  children,
+  steps,
+  compact = false,
+}: {
+  title: string;
+  children?: ReactNode;
+  steps?: string[];
+  compact?: boolean;
+}) {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setSecs(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const mm = Math.floor(secs / 60);
+  const ss = String(secs % 60).padStart(2, "0");
+  // Dummy-voortgang: loopt snel op en vlakt af, zodat de balk altijd beweegt maar nooit "klaar" suggereert.
+  const pct = Math.min(92, Math.round(100 * (1 - Math.exp(-secs / 60))));
+  const activeStep = steps && steps.length ? Math.min(steps.length - 1, Math.floor(secs / 20)) : -1;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`rounded-xl border border-blue-200 bg-blue-50 text-blue-900 ${compact ? "p-4" : "p-5"} flex flex-col items-center text-center gap-3`}
+    >
+      <div className="relative">
+        <Spinner className={compact ? "w-10 h-10 text-red-600" : "w-12 h-12 text-red-600"} />
+        <span className="absolute inset-0 flex items-center justify-center text-lg" aria-hidden>
+          🤖
+        </span>
+      </div>
+      <div>
+        <div className="font-semibold text-base">{title}</div>
+        {children && <div className="text-sm text-blue-800 mt-1 max-w-md">{children}</div>}
+      </div>
+      <div className="w-full max-w-sm">
+        <div className="h-2 rounded-full bg-blue-100 overflow-hidden">
+          <div className="h-full bg-red-500 transition-all duration-1000 animate-pulse" style={{ width: `${Math.max(pct, 5)}%` }} />
+        </div>
+        <div className="text-xs text-blue-700 mt-1 tabular-nums">
+          Bezig sinds {mm}:{ss} · dit duurt meestal 1 à 3 minuten
+        </div>
+      </div>
+      {steps && steps.length > 0 && (
+        <ol className="text-xs text-left space-y-1">
+          {steps.map((s, i) => (
+            <li key={s} className={`flex items-center gap-2 ${i < activeStep ? "text-green-700" : i === activeStep ? "font-semibold text-blue-900" : "text-blue-400"}`}>
+              <span aria-hidden className="w-4 inline-flex justify-center">
+                {i < activeStep ? "✓" : i === activeStep ? <Spinner className="w-3 h-3" /> : "•"}
+              </span>
+              {s}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/** PDF-voorbeeld in een iframe (met Authorization opgehaald als blob), zonder pagina-overzicht. */
+export function AuthPdf({
+  api,
+  url,
+  title,
+  height = "h-[80vh]",
+}: {
+  api: Api;
+  url: string | null;
+  title: string;
+  height?: string;
+}) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -101,9 +176,21 @@ export function AuthPdf({ api, url, title }: { api: Api; url: string | null; tit
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, api.token]);
-  if (!url || failed) return <div className="text-sm text-gray-500 p-6 text-center">Geen voorbeeld beschikbaar.</div>;
-  if (!src) return <Loader />;
-  return <iframe src={src} title={title} className="w-full h-[70vh] rounded-lg border border-gray-200 bg-white" />;
+  if (!url || failed) return <div className={`text-sm text-gray-500 p-6 text-center rounded-lg border border-dashed border-gray-300 ${height} flex items-center justify-center`}>Geen voorbeeld beschikbaar.</div>;
+  if (!src) return <Loader text="Voorbeeld laden…" />;
+  // Fragment: verbergt het miniaturen-/paginaoverzicht en de werkbalk van de ingebouwde PDF-viewer
+  // (Chrome/Edge: navpanes/toolbar, Firefox: pagemode) en past de pagina aan de breedte aan.
+  const viewerSrc = `${src}#toolbar=0&navpanes=0&scrollbar=1&pagemode=none&view=FitH`;
+  return (
+    <div className="space-y-1">
+      <iframe src={viewerSrc} title={title} className={`w-full ${height} rounded-lg border border-gray-200 bg-white`} />
+      <div className="text-right">
+        <a href={src} target="_blank" rel="noreferrer" className="text-xs text-red-600 hover:underline">
+          ↗ Open in nieuw tabblad (volledige viewer)
+        </a>
+      </div>
+    </div>
+  );
 }
 
 export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {

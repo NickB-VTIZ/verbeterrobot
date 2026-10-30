@@ -226,6 +226,8 @@ De app is bereikbaar op `http://<host>:3010`.
 5. Controleer de antwoorden, pas aan of keur goed.
 6. Download de sleutel — zelfde opmaak, antwoorden in rood. De snelle werkwijze zonder bibliotheek (*Snel document verbeteren*) blijft beschikbaar.
 
+De voorbeelden (origineel en sleutel naast elkaar) worden zonder het paginaoverzicht van de PDF-viewer getoond, zodat ze de volle breedte gebruiken; via *Open in nieuw tabblad* krijg je de volledige viewer. Terwijl de AI bezig is (voorstel of sleutel) toont de app een duidelijk voortgangspaneel met verstreken tijd en de lopende stappen.
+
 ---
 
 ## Veiligheidsnota's

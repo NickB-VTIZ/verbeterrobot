@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Api, ApiError } from "./api";
-import { AuthPdf, Banner, EmptyState, Loader, Spinner } from "./ui";
+import { AuthPdf, Banner, EmptyState, GeneratingPanel, Loader, Spinner } from "./ui";
 import DocView from "./DocView";
 import { Mark, Para, ROLE_META, ROLE_ORDER, Role, SLOT_LABEL } from "./markingTypes";
 
@@ -562,6 +562,25 @@ export default function Marking({ api, id, onBack, onDone }: Props) {
       </div>
 
       {message && <Banner tone={message.tone}>{message.text}</Banner>}
+
+      {(busy === "propose" || proposalStatus === "bezig") && (
+        <GeneratingPanel
+          compact
+          title="De AI maakt een voorstel…"
+          steps={["Document lezen", "Vragen en antwoordplaatsen herkennen", "Voorstel controleren"]}
+        >
+          De aanduidingen verschijnen automatisch in het document zodra de AI klaar is.
+        </GeneratingPanel>
+      )}
+      {generating && (
+        <GeneratingPanel
+          compact
+          title="De AI genereert de antwoordsleutel…"
+          steps={["Aanduidingen bewaren", "Elke vraag oplossen", "Antwoorden in rood invoegen", "Controle en voorbeeld maken"]}
+        >
+          Sluit dit scherm niet tot de sleutel klaar is.
+        </GeneratingPanel>
+      )}
 
       <div className="card p-4 space-y-3 sticky top-2 z-20">
         <div className="flex flex-wrap items-center gap-2">

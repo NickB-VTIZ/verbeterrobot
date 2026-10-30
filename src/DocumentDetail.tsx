@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Api, ApiError, formatBytes, formatDate } from "./api";
-import { AuthPdf, Banner, EmptyState, Loader, Modal, PurgeDialog, Spinner } from "./ui";
+import { AuthPdf, Banner, EmptyState, GeneratingPanel, Loader, Modal, PurgeDialog, Spinner } from "./ui";
 import { StatusPill } from "./Library";
 import CorrectedUpload from "./CorrectedUpload";
 
@@ -202,6 +202,7 @@ export default function DocumentDetail({ api, role, userName, id, onBack, onMark
       "Voorbeelden worden opnieuw gemaakt; ververs over enkele seconden."
     );
 
+  const isGenerating = !inTrash && (busy === "generate" || data.generating || doc.status === "bezig");
   const originalPdf = `/api/documents/${id}/preview/original/pdf`;
   const keyPdf = version ? `/api/documents/${id}/preview/version/${version.versionNumber}/pdf` : null;
   const showOrig = previewTab !== "sleutel";
@@ -240,7 +241,8 @@ export default function DocumentDetail({ api, role, userName, id, onBack, onMark
                 </button>
               )}
               <button className="btn-sm-red" onClick={generate} disabled={!!busy || data.generating}>
-                {busy === "generate" || data.generating ? <Spinner className="w-3.5 h-3.5" /> : "⚙"} {data.versions.length ? "Opnieuw genereren" : "Sleutel genereren"}
+                {isGenerating ? <Spinner className="w-3.5 h-3.5" /> : "⚙"}{" "}
+                {isGenerating ? "AI is bezig met genereren…" : data.versions.length ? "Opnieuw genereren" : "Sleutel genereren"}
               </button>
             </>
           )}
@@ -258,19 +260,21 @@ export default function DocumentDetail({ api, role, userName, id, onBack, onMark
       </div>
 
       {inTrash && <Banner tone="warn">Dit document staat in de prullenbak (verwijderd door {doc.deletedBy || "onbekend"} op {formatDate(doc.deletedAt)}).</Banner>}
-      {(data.generating || doc.status === "bezig") && (
-        <Banner tone="info">
-          <span className="inline-flex items-center gap-2">
-            <Spinner className="w-4 h-4" /> Er loopt een generatie voor dit document…
-          </span>
-        </Banner>
+      {isGenerating && (
+        <GeneratingPanel
+          title="De AI genereert de antwoordsleutel…"
+          steps={["Vragen en antwoordplaatsen inlezen", "Elke vraag oplossen", "Antwoorden in rood invoegen in het document", "Controle en voorbeeld maken"]}
+        >
+          Je mag deze pagina open laten staan: ze ververst automatisch zodra de nieuwe versie klaar is.
+        </GeneratingPanel>
       )}
-      {doc.proposalStatus === "bezig" && !inTrash && (
-        <Banner tone="info">
-          <span className="inline-flex items-center gap-2">
-            <Spinner className="w-4 h-4" /> De AI maakt een eerste grondig voorstel voor de vragen en antwoordplaatsen…
-          </span>
-        </Banner>
+      {doc.proposalStatus === "bezig" && !inTrash && !isGenerating && (
+        <GeneratingPanel
+          title="De AI maakt een eerste voorstel…"
+          steps={["Document lezen", "Vragen en antwoordplaatsen herkennen", "Voorstel controleren"]}
+        >
+          De AI zoekt de vragen en antwoordplaatsen in je document. Je kan het daarna nakijken via &ldquo;Aanduiden&rdquo;.
+        </GeneratingPanel>
       )}
       {doc.proposalStatus === "klaar" && !inTrash && data.marks.teacher === 0 && data.marks.proposal > 0 && (
         <Banner tone="ok">
@@ -342,20 +346,48 @@ export default function DocumentDetail({ api, role, userName, id, onBack, onMark
             </div>
           </div>
         </div>
-        <div className={`grid gap-4 ${showOrig && showKey ? "lg:grid-cols-2" : "grid-cols-1"}`}>
+        <div className={`grid gap-4 ${showOrig && showKey ? "xl:grid-cols-2" : "grid-cols-1"}`}>
           {showOrig && (
-            <div>
-              <div className="text-xs font-semibold text-gray-500 mb-1">Origineel</div>
-              <AuthPdf api={api} url={originalPdf} title="Origineel" />
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-3 py-2 bg-gray-100 border-b border-gray-200 flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <span aria-hidden>📄</span> Origineel
+              </div>
+              <div className="p-2">
+                <AuthPdf api={api} url={originalPdf} title="Origineel" />
+              </div>
             </div>
           )}
           {showKey && (
-            <div>
-              <div className="text-xs font-semibold text-gray-500 mb-1">Sleutel{version ? ` — versie ${version.versionNumber}` : ""}</div>
-              {version ? <AuthPdf api={api} url={keyPdf} title="Sleutel" /> : <EmptyState icon="🔑" title="Nog geen sleutel">Genereer de sleutel om hem hier naast het origineel te zien.</EmptyState>}
+            <div className="rounded-xl border border-red-200 overflow-hidden">
+              <div className="px-3 py-2 bg-red-50 border-b border-red-200 flex items-center gap-2 text-sm font-semibold text-red-800">
+                <span aria-hidden>🔑</span> Sleutel{version ? ` — versie ${version.versionNumber}` : ""}
+                {isGenerating && (
+                  <span className="ml-auto inline-flex items-center gap-1 text-xs font-normal text-blue-800">
+                    <Spinner className="w-3 h-3" /> nieuwe versie wordt gemaakt…
+                  </span>
+                )}
+              </div>
+              <div className="p-2">
+                {version ? (
+                  <AuthPdf api={api} url={keyPdf} title="Sleutel" />
+                ) : isGenerating ? (
+                  <GeneratingPanel compact title="Sleutel wordt gemaakt…">
+                    De sleutel verschijnt hier naast het origineel zodra de AI klaar is.
+                  </GeneratingPanel>
+                ) : (
+                  <EmptyState icon="🔑" title="Nog geen sleutel">
+                    Genereer de sleutel om hem hier naast het origineel te zien.
+                  </EmptyState>
+                )}
+              </div>
             </div>
           )}
         </div>
+        {showOrig && showKey && (
+          <p className="text-xs text-gray-500">
+            Tip: gebruik &ldquo;origineel&rdquo; of &ldquo;sleutel&rdquo; hierboven voor een volledig brede weergave, of open een voorbeeld in een nieuw tabblad.
+          </p>
+        )}
         {version && (
           <div className="flex flex-wrap gap-2">
             <button className="btn-sm" disabled={!!busy} onClick={() => dl(`/api/documents/${id}/download/version/${version.versionNumber}`, `sleutel-v${version.versionNumber}.docx`)}>
